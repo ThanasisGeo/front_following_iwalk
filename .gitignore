@@ -1,0 +1,11 @@
+# Large files live in Kaggle Datasets / locally, never in git (see SETUP.md §10)
+data/
+*.pt
+results/*/vis/
+results/*/tb/
+results/_unused_downloads/
+CLAUDE/
+
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
