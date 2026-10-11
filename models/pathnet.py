@@ -1,3 +1,31 @@
+# =====================================================================================================
+# models/pathnet.py: overview
+# =====================================================================================================
+# Four classes live here. Only ONE of them is part of the model in the paper / the released weights:
+#
+#   class        | used by the released configs?           | what it is
+#   -------------|------------------------------------------|---------------------------------------------
+#   UNet         | YES: it's the "PathNet" inside Path_GRU  | map-to-map network: occupancy map + past-trajectory
+#                |   (models/path_gru.py imports it)        | heat-maps in, future-trajectory heat-maps out
+#   PoseNet      | no, only Path_MLP below uses it          | plain 4-layer MLP pose predictor. NOT the PoseNet in
+#                |                                          | path_gru.py: same name, different class
+#   Path_MLP     | no, registered in models/motion_pred.py  | older version of Path_GRU: same UNet path stage, but
+#                |   but no cfg selects it                  | an MLP instead of GRUs for the pose stage
+#   PathNet_v2   | no, registered but no cfg selects it     | early baseline: ResNet18 on the occupancy map that
+#                |                                          | regresses (x, y) directly, without heat-maps or a pose net
+#
+# Path_MLP and PathNet_v2 look like experiments the authors kept from development (ablations / earlier
+# versions). They are still selectable via `model_name:` in a cfg, but only partly work with the
+# current train.py / eval.py (see the notes above each class).
+#
+# Shared conventions (same as path_gru.py):
+#   * Everything is in the ACTOR frame: the human's current pose is at the origin, metres, z up.
+#   * Maps are map_size x map_size (40 x 40) grids covering [-max_dist_from_human, +max_dist_from_human]
+#     in x and y (+-4 m for Real-IM, so 0.2 m per cell). Row index = y, column index = x
+#     (see utils/gta_utils.traj2map / map2traj).
+#   * Map tensors are 5-D: (batch, n_maps, H, W, 1). The trailing 1 is a channel axis that is always 1.
+# =====================================================================================================
+
 from collections import OrderedDict
 
 import torch
@@ -9,6 +37,33 @@ from utils.vis_utils import vis_skeleton_pcd
 from utils.gta_utils import traj2map
 
 
+# -----------------------------------------------------------------------------------------------------
+# UNet: the "PathNet" (stage 1 of the paper's model). Predicts WHERE the person will walk.
+# -----------------------------------------------------------------------------------------------------
+# Input  x:     (B, 1 + n_hist, 40, 40, 1). Channel 0 is the occupancy map, channels 1..15 are one
+#               heat-map per past frame showing where the person's root joint was.
+#        poses: (B, n_hist, 2), the past root (x, y) as plain numbers.
+# Output:       (B, n_pred, 40, 40, 1), one heat-map per FUTURE frame, each pixel in [0, 1] (sigmoid).
+#               Path_GRU turns each map into one (x, y) with a soft-argmax (utils/gta_utils.map2traj).
+#
+# Architecture (n_feats_unet = f = 32; spatial size in brackets):
+#
+#   in(16)[40] -enc1-> f[40] -pool-> enc2 2f[20] -pool-> enc3 4f[10] -pool-> bottleneck 8f[5]
+#                                                                                 | flatten (8f*5*5 = 6400)
+#                                                     concat past (x, y) (30) --> +
+#                                                     MLP fc1 -> fc2 -> fc3 (width 8f*16 = 4096)
+#                                                                                 | reshape back to 8f[5]
+#   out(15)[40] <-1x1 conv- dec1 f[40] <-up- dec2 2f[20] <-up- dec3 4f[10] <-up-+
+#          ^ skip from enc1        ^ skip from enc2   ^ skip from enc3
+#
+# * It's a standard 3-level U-Net (encoder, decoder, skip connections) with one twist: the bottleneck goes
+#   through a fully-connected MLP that also sees the raw past trajectory numbers. The MLP mixes global
+#   information (where the person is heading) into the whole 5x5 feature grid before decoding.
+# * CONSTRAINT: the hard-coded "5 * 5" in fc1/fc3 means the input must be 40x40 (40 / 2 / 2 / 2 = 5).
+#   Changing map_size needs these lines changed (and the data regenerated).
+# * cfg['model_specs']['n_feats_unet_mlp'] is stored below but never used. The MLP width is 8f*16.
+# * The commented-out encoder4/decoder4 are a removed 4th level (it wouldn't divide 40 evenly anyway).
+# -----------------------------------------------------------------------------------------------------
 class UNet(torch.nn.Module):
     def __init__(self, in_channels, out_channels, cfg):
         super(UNet, self).__init__()
@@ -57,6 +112,8 @@ class UNet(torch.nn.Module):
 
     def forward(self, x, poses):
         # Input x shape: batch_size, n_frames, 18, 17, 4
+        # (The line above is outdated. Here x is (B, 1 + n_hist, 40, 40, 1). First the 5-D map stack is
+        #  folded into an ordinary image batch (B, 16, 40, 40): each map becomes one image channel.)
         bs, n_inp, h, w, chn = x.shape
         x = x.permute((0, 2, 3, 1, 4)).reshape((bs, h, w, -1))  # bs, h, w, chn * n_inp
         x = x.permute((0, 3, 1, 2))  # bs, chn * n_inp, h, w
@@ -88,12 +145,28 @@ class UNet(torch.nn.Module):
         dec1 = torch.cat((dec1, enc1), dim=1)
         dec1 = self.decoder1(dec1)
         out = self.conv(dec1)
+        # Sigmoid = an independent "is the person here at frame t?" probability per pixel (not a softmax over
+        # the map). That matches the BCE trajectory-map loss in train.py.
+        #
+        # !! IMPORTANT for anyone changing this class: the last reshape(...).permute(...) below does NOT
+        # turn (B, 15, H, W) back into (B, 15, H, W, 1) element-for-element. reshape reinterprets memory,
+        # so output frame k at pixel (r, c) actually comes from a different conv channel/pixel. (Checked: a
+        # value at frame 3, row 10, col 20 ends up at frame 0, row 8, col 28.) The correct inverse of the
+        # input folding would be out.permute(0, 2, 3, 1).unsqueeze(3).permute(0, 4, 1, 2, 3).
+        # Training still works because the scrambling is a FIXED permutation and the conv layers learn to
+        # compensate, but it removes the "pixel matches pixel" structure a U-Net is good at.
+        # The released weights were trained WITH this behaviour, so "fixing" it makes them useless. Only
+        # change it for models you train from scratch, and compare both versions.
         sig = nn.Sigmoid()
         x = sig(out.reshape((bs, self.out_channels, -1)))
         x = x.reshape((bs, self.out_channels, h, w))
         x = x.reshape((bs, h, w, chn, -1)).permute((0, 4, 1, 2, 3))
+        # `bottleneck` is returned but all callers ignore it (it's the conv output from BEFORE the MLP).
         return x, bottleneck
 
+    # One U-Net "level": two (3x3 conv -> BatchNorm -> ReLU) layers that keep the spatial size.
+    # The `name` prefixes become the parameter names in the checkpoints (e.g. "encoder1.enc1conv1.weight"),
+    # so renaming them breaks loading of the released weights.
     @staticmethod
     def _block(in_channels, features, name):
         return nn.Sequential(
@@ -128,6 +201,13 @@ class UNet(torch.nn.Module):
         )
 
 
+# -----------------------------------------------------------------------------------------------------
+# PoseNet (MLP version). NOT USED by the released model. Only Path_MLP below uses it.
+# -----------------------------------------------------------------------------------------------------
+# A plain 4-layer MLP: flatten every input pose number into one vector, then output all future poses at
+# once. It has no notion of time. Path_GRU replaced it with the GRU-based PoseNet in path_gru.py
+# (same class name, different module).
+# -----------------------------------------------------------------------------------------------------
 class PoseNet(torch.nn.Module):
     def __init__(self, in_feats, n_feats, out_feats):
         super(PoseNet, self).__init__()
@@ -146,6 +226,22 @@ class PoseNet(torch.nn.Module):
         return x
 
 
+# -----------------------------------------------------------------------------------------------------
+# Path_MLP: older two-stage model. NOT USED by the released configs (selectable as model_name: Path_MLP).
+# -----------------------------------------------------------------------------------------------------
+# Same two-stage idea as Path_GRU (read path_gru.py for the full explanation of the stages and of
+# train vs test mode). The difference is stage 2:
+#   stage 1 (path): the same UNet as Path_GRU -> future (x, y) per frame.
+#   stage 2 (pose): the MLP PoseNet above. Its input is the past root-relative poses followed by the LAST
+#                   pose copied n_pred times (a "the person keeps this pose" guess), and it outputs all
+#                   future relative poses at once. The future root position comes from stage 1.
+#
+# Compatibility with the current scripts:
+#   * train.py: should work. The forward() output dict has the same keys as Path_GRU.
+#   * eval.py:  breaks. eval.py calls load_model(pathnet, posenet, device) with 3 arguments, but the
+#               load_model below only takes 2.
+#   * The released checkpoints don't fit it (the posenet layers have different shapes).
+# -----------------------------------------------------------------------------------------------------
 class Path_MLP(torch.nn.Module):
 
     def __init__(self, cfg):
@@ -268,6 +364,24 @@ class Path_MLP(torch.nn.Module):
         return pose_rel
 
 
+# -----------------------------------------------------------------------------------------------------
+# PathNet_v2: early trajectory-only baseline. NOT USED (selectable as model_name: PathNet_v2).
+# -----------------------------------------------------------------------------------------------------
+# Instead of drawing the future path as heat-maps, this version:
+#   1. runs the occupancy map (copied to 3 channels, like an RGB image) through an untrained ResNet18
+#      and gets one feature vector for the whole map,
+#   2. concatenates it with the past root (x, y) and regresses future (x, y) numbers directly with an MLP,
+#   3. builds "future poses" by moving the LAST observed pose along that path. The body pose itself is
+#      never predicted (no learned pose network).
+# It has no spatial output, so it can't use the trajectory-map or collision losses. Path_MLP / Path_GRU
+# replaced it with the UNet + heat-map approach above.
+#
+# Compatibility with the current scripts: NOT runnable as-is.
+#   * forward() returns no 'traj_map', which the cfg losses (use_traj_map / use_collision) need.
+#   * It has no load_model / save_model, which train.py and eval.py call.
+#   * fc3 outputs n_hist * 2 numbers that are reshaped as n_pred frames, so it only works while
+#     n_hist == n_pred.
+# -----------------------------------------------------------------------------------------------------
 class PathNet_v2(nn.Module):
 
     def __init__(self, cfg):

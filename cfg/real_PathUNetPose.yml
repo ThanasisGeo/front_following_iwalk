@@ -1,0 +1,58 @@
+# M1: PathNet UNet + past skeletons (pose history) as extra bottleneck input. Plan: CLAUDE/pose_conditioned_path.md
+# Warm start from the released PathNet: train_path.py --init_released <pathnet_3600.pt> --lr 1e-5
+dataset: Real_IM
+model_name: PathUNetPose
+model_specs:
+  n_feats_unet: 32          # must stay 32 to load the released weights
+  n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
+  pose_input: learned       # learned (M1) | orientation (M1-A ablation)
+  n_feats_pose_path: 128    # size of the learned pose feature fed into the UNet bottleneck
+
+dataset_specs:
+  n_hist: 15
+  n_pred: 15
+  n_joints: 18
+  data_file: ../data/Real-IM-Dataset-processed/
+  max_dist_from_human: 4
+  num_scene_points: 50000
+  step: 1
+
+  root_idx: 17
+  left_hip_idx: 11
+  right_hip_idx: 12
+
+  use_raw_obs: false
+  use_env_pcd: false
+  use_map: true
+  use_traj_map: true
+  use_pose_gt: false
+  map_size: 40              # hard-coded 5x5 bottleneck in the UNet: must stay 40
+  z_min: -1.0
+  z_max: 0.5
+  z_floor: -0.3
+
+  train: ['kl_f2_seq1_raw', 'kl_f4_seq2_raw', 'me_f2_seq2_raw', 'op_seq3_raw']
+  test: ['me_f2_seq1_raw']
+
+loss:                       # path losses only (same weights as the paper's cfg)
+  use_traj: true
+  use_final_pos: true
+  use_traj_map: true
+  use_collision: true
+  weight_traj: 1
+  weight_final_pos: 1
+  weight_traj_map: 1.0
+  weight_collision: 1.0
+  weight_bce: 40.0
+
+turns:                      # turn detection thresholds (utils/turns.py DEFAULT_THRESHOLDS)
+  turn_lat: 0.75
+  turn_heading: 30.0
+  straight_lat_max: 0.5
+  hist_curv_new: 15.0
+  onset_lat: 0.25
+
+lr: 0.0001                  # from scratch; for fine-tuning from the released weights pass --lr 1e-5
+lr_step_size: 600
+lr_gamma: 0.1
+save_freq: 100
