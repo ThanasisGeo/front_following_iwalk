@@ -112,7 +112,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp', default='exp', help='run name -> results/<cfg>_<exp>/')
     parser.add_argument('--ckpt', default='best', help="'best', 'last', an epoch number, or a checkpoint path")
     parser.add_argument('--test_seq', default=None, help='evaluate on this sequence instead of the cfg test list')
-    parser.add_argument('--set', nargs='*', default=[], help='cfg overrides, e.g. model_specs.pose_input=orientation')
+    parser.add_argument('--set', nargs='*', default=[], help='cfg overrides, e.g. model_specs.n_feats_pose_path=64')
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--seed', type=int, default=0)

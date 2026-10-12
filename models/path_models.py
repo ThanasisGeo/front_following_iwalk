@@ -10,21 +10,18 @@
 #
 #   PathUNet      B1/B2: the released PathNet (UNet, models/pathnet.py) on its own. Its checkpoints are plain
 #                 UNet state_dicts, so results/real_Path_GRU_exp/models/pathnet_3600.pt loads directly.
-#   PathUNetPose  M1: the same UNet, but its bottleneck MLP also receives the past skeletons, encoded as set by
-#                 model_specs.pose_input:
-#                   'learned'      PoseHistEncoder: small per-frame MLP + GRU over root-relative skeletons
-#                   'orientation'  OrientationFeatures (M1-A ablation): torso facing + head direction only
+#   PathUNetPose  M1: the same UNet, but its bottleneck MLP also receives the past skeletons, encoded by
+#                 PoseHistEncoder (small per-frame MLP + GRU over root-relative skeletons), model_specs.pose_input: learned
+#
+#   model_specs.traj_map_input (default true): false = the UNet sees ONLY the occupancy map (1 input channel)
+#                 instead of [occupancy map + 15 past-path heat-maps]. The past hip positions still reach the
+#                 bottleneck as numbers (and inside the skeletons). Can't warm start from the released weights.
 # =====================================================================================================
 import torch
 from torch import nn
 
 from models.pathnet import UNet
 from utils.gta_utils import map2traj, get_relative_pose
-
-# Real-IM joint order: COCO-17 + hip centre (index 17). "Left/right" are the person's left/right.
-COCO_ORIENTATION_JOINTS = {'nose': 0, 'l_ear': 3, 'r_ear': 4, 'l_shoulder': 5, 'r_shoulder': 6,
-                           'l_hip': 11, 'r_hip': 12}
-
 
 class PoseHistEncoder(nn.Module):
     # Past skeletons (B, n_hist, J, 3) -> one feature vector (B, d).
@@ -40,29 +37,6 @@ class PoseHistEncoder(nn.Module):
         bs, nf = pose.shape[:2]
         rel = get_relative_pose(pose, self.root_idx, self.n_joints).reshape(bs, nf, -1)
         return self.gru(self.frame_mlp(rel))[1][0]  # final hidden state
-
-
-class OrientationFeatures(nn.Module):
-    # M1-A ablation. Hand-crafted and parameter-free: for each past frame, two unit vectors in the ground
-    # plane, the torso facing direction (perpendicular to the hip and shoulder lines) and the head direction
-    # (nose minus the ear midpoint). Output: (B, n_hist * 4).
-    def __init__(self, n_hist, joints):
-        super().__init__()
-        self.joints, self.out_dim = joints, n_hist * 4
-
-    @staticmethod
-    def _unit(v, eps=1e-6):
-        n = v.norm(dim=-1, keepdim=True)
-        return torch.where(n > eps, v / n.clamp(min=eps), torch.zeros_like(v))
-
-    def forward(self, pose):
-        p, j = pose[..., :2], self.joints
-        across = (p[:, :, j['l_hip']] - p[:, :, j['r_hip']]) + (p[:, :, j['l_shoulder']] - p[:, :, j['r_shoulder']])
-        # Rotating the left-minus-right vector by -90 deg (z up) points forward. Checked on Real-IM: mean cosine
-        # 0.90 with the future walking direction. The head direction is a weaker cue (0.51): people look around.
-        facing = torch.stack((across[..., 1], -across[..., 0]), dim=-1)
-        head = p[:, :, j['nose']] - (p[:, :, j['l_ear']] + p[:, :, j['r_ear']]) / 2
-        return torch.cat((self._unit(facing), self._unit(head)), dim=-1).reshape(pose.shape[0], -1)
 
 
 class UNetPose(UNet):
@@ -91,35 +65,32 @@ class PathUNet(nn.Module):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.pose_input = ms.get('pose_input', self.default_pose_input)
+        self.traj_map_input = ms.get('traj_map_input', True)
+        in_channels = 1 + self.n_hist if self.traj_map_input else 1
         if self.pose_input == 'none':
-            self.pathnet = UNet(1 + self.n_hist, self.n_pred, cfg)
+            self.pathnet = UNet(in_channels, self.n_pred, cfg)
         else:
-            self.pathnet = UNetPose(1 + self.n_hist, self.n_pred, cfg, self._make_pose_encoder(cfg))
+            self.pathnet = UNetPose(in_channels, self.n_pred, cfg, self._make_pose_encoder(cfg))
 
     def _make_pose_encoder(self, cfg):
         ms = cfg['model_specs']
         if self.pose_input == 'learned':
             return PoseHistEncoder(self.n_joints, self.root_idx, ms.get('n_feats_pose_path', 128))
-        if self.pose_input == 'orientation':
-            joints = ms.get('orientation_joints')
-            if joints is None:
-                if cfg['dataset'] != 'Real_IM':
-                    raise ValueError("pose_input 'orientation' needs model_specs.orientation_joints for this dataset")
-                joints = COCO_ORIENTATION_JOINTS
-            return OrientationFeatures(self.n_hist, joints)
-        raise ValueError(f"unknown model_specs.pose_input: {self.pose_input!r} (none | learned | orientation)")
+        raise ValueError(f"unknown model_specs.pose_input: {self.pose_input!r} (none | learned)")
 
     def forward(self, poses_inp):
         pose = poses_inp['pose']['pose'].to(self.device).float()           # (B, n_hist, J, 3) past skeletons
-        occ_map = poses_inp['env']['map'].to(self.device).float()           # (B, 1, H, W, 1)
-        traj_map_hist = poses_inp['pose']['traj_map'].to(self.device).float()  # (B, n_hist, H, W, 1)
+        maps = poses_inp['env']['map'].to(self.device).float()              # (B, 1, H, W, 1) occupancy
+        if self.traj_map_input:
+            traj_map_hist = poses_inp['pose']['traj_map'].to(self.device).float()  # (B, n_hist, H, W, 1)
+            maps = torch.cat((maps, traj_map_hist), dim=1)
         bs = pose.shape[0]
 
         traj_hist = pose[:, :, self.root_idx, :2]
         extra = [traj_hist.reshape(bs, -1)]
         if self.pose_input != 'none':
             extra.append(self.pathnet.pose_encoder(pose))
-        traj_map_pred, _ = self.pathnet(torch.cat((occ_map, traj_map_hist), dim=1), torch.cat(extra, dim=1))
+        traj_map_pred, _ = self.pathnet(maps, torch.cat(extra, dim=1))
         traj_pred = map2traj(traj_map_pred, self.max_dist_from_human, self.resol, self.device)
         return {'traj': traj_pred.float(), 'traj_map': traj_map_pred}
 
@@ -134,6 +105,8 @@ class PathUNet(nn.Module):
         # Without pose input this is an ordinary strict load. With pose input, every released weight is copied,
         # and the extra fc1 input columns (the pose feature) start at ZERO. The model then computes exactly what
         # the released model computes and can only learn to use the pose from there.
+        if not self.traj_map_input:
+            raise ValueError('traj_map_input: false changes the first conv layer; train it from scratch (INIT="none")')
         sd = torch.load(path, map_location='cpu')
         if self.pose_input == 'none':
             self.pathnet.load_state_dict(sd)
@@ -157,7 +130,7 @@ class PathUNetPose(PathUNet):
     def __init__(self, cfg):
         super().__init__(cfg)
         if self.pose_input == 'none':
-            raise ValueError("PathUNetPose needs model_specs.pose_input 'learned' or 'orientation'")
+            raise ValueError("PathUNetPose needs model_specs.pose_input 'learned'")
 
 
 named_path_models = {

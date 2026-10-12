@@ -5,7 +5,7 @@ model_name: PathUNetPose
 model_specs:
   n_feats_unet: 32          # must stay 32 to load the released weights
   n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
-  pose_input: learned       # learned (M1) | orientation (M1-A ablation)
+  pose_input: learned       # learned pose-history encoder (M1)
   n_feats_pose_path: 128    # size of the learned pose feature fed into the UNet bottleneck
 
 dataset_specs:

@@ -5,7 +5,7 @@ model_name: PathUNet
 model_specs:
   n_feats_unet: 32          # must stay 32 to load the released weights
   n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
-  pose_input: none          # none | learned | orientation  (see models/path_models.py)
+  pose_input: none          # none | learned  (see models/path_models.py)
 
 dataset_specs:
   n_hist: 15

@@ -1,11 +1,13 @@
-# M1-A ablation: like real_PathUNetPose, but the pose enters only as hand-crafted orientation features.
-# Warm start from the released PathNet: train_path.py --init_released <pathnet_3600.pt> --lr 1e-5
+# M1, map-only input: like real_PathUNetPose (pose history + map), but the UNet input is ONLY the occupancy map:
+# no past-path heat-maps. Train from scratch (no warm start possible).
 dataset: Real_IM
 model_name: PathUNetPose
 model_specs:
   n_feats_unet: 32          # must stay 32 to load the released weights
   n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
-  pose_input: orientation   # M1-A: torso facing + head direction per past frame (no learned encoder)
+  pose_input: learned       # learned pose-history encoder (M1)
+  n_feats_pose_path: 128    # size of the learned pose feature fed into the UNet bottleneck
+  traj_map_input: false     # UNet input = occupancy map only (1 channel instead of 16)
 
 dataset_specs:
   n_hist: 15

@@ -243,7 +243,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.0, help='initial LR (0 = cfg lr)')
     parser.add_argument('--test_seq', default=None, help='fold: use this sequence as the test set, train on the rest')
-    parser.add_argument('--set', nargs='*', default=[], help='cfg overrides, e.g. model_specs.pose_input=orientation')
+    parser.add_argument('--set', nargs='*', default=[], help='cfg overrides, e.g. model_specs.n_feats_pose_path=64')
     parser.add_argument('--init_released', default=None, help='warm start from a released pathnet_N.pt')
     parser.add_argument('--resume', default=None, help='path to trainstate_last.pt')
     parser.add_argument('--val_frac', type=float, default=0.2)
