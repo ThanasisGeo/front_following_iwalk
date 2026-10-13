@@ -154,7 +154,12 @@ def main(args):
     n_params = sum(p.numel() for p in model.parameters())
     print(f"{cfg['model_name']} (pose_input={model.pose_input}): {n_params / 1e6:.2f} M parameters, device {device}")
 
-    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad], lr=cfg['lr'])
+    params = [p for p in model.parameters() if p.requires_grad]
+    weight_decay = cfg.get('weight_decay', 0.0)
+    if weight_decay:  # AdamW = Adam with decoupled weight decay; without it, plain Adam exactly as before
+        optimizer = torch.optim.AdamW(params, lr=cfg['lr'], weight_decay=weight_decay)
+    else:
+        optimizer = torch.optim.Adam(params, lr=cfg['lr'])
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=cfg['lr_step_size'], gamma=cfg['lr_gamma'])
     start_epoch, best = 0, {'metric': args.select, 'value': float('inf'), 'epoch': None}
     if state is not None:

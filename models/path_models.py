@@ -16,6 +16,9 @@
 #   model_specs.traj_map_input (default true): false = the UNet sees ONLY the occupancy map (1 input channel)
 #                 instead of [occupancy map + 15 past-path heat-maps]. The past hip positions still reach the
 #                 bottleneck as numbers (and inside the skeletons). Can't warm start from the released weights.
+#   model_specs.mlp_width (default: none = released 4096): width of the UNet's bottleneck MLP fc1 -> fc2 -> fc3,
+#                 which holds ~69 M of the ~72 M parameters. model_specs.mlp_dropout adds dropout before fc2 and fc3.
+#                 A smaller width (e.g. 512) is the main lever against overfitting; it rules out warm starts.
 # =====================================================================================================
 import torch
 from torch import nn
@@ -72,6 +75,16 @@ class PathUNet(nn.Module):
         else:
             self.pathnet = UNetPose(in_channels, self.n_pred, cfg, self._make_pose_encoder(cfg))
 
+        # Smaller bottleneck MLP. UNet.forward only calls fc1/fc2/fc3 (ReLU after fc1 and fc2), so swapping the
+        # layers here is enough; models/pathnet.py stays unchanged.
+        self.mlp_width = ms.get('mlp_width')
+        if self.mlp_width:
+            p = ms.get('mlp_dropout', 0.0)
+            n_in, n_out = self.pathnet.fc1.in_features, self.pathnet.fc3.out_features
+            self.pathnet.fc1 = nn.Linear(n_in, self.mlp_width)
+            self.pathnet.fc2 = nn.Sequential(nn.Dropout(p), nn.Linear(self.mlp_width, self.mlp_width))
+            self.pathnet.fc3 = nn.Sequential(nn.Dropout(p), nn.Linear(self.mlp_width, n_out))
+
     def _make_pose_encoder(self, cfg):
         ms = cfg['model_specs']
         if self.pose_input == 'learned':
@@ -107,6 +120,8 @@ class PathUNet(nn.Module):
         # the released model computes and can only learn to use the pose from there.
         if not self.traj_map_input:
             raise ValueError('traj_map_input: false changes the first conv layer; train it from scratch (INIT="none")')
+        if self.mlp_width:
+            raise ValueError('mlp_width changes the bottleneck MLP; train it from scratch (INIT="none")')
         sd = torch.load(path, map_location='cpu')
         if self.pose_input == 'none':
             self.pathnet.load_state_dict(sd)
