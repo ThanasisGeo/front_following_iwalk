@@ -19,6 +19,11 @@
 #   model_specs.mlp_width (default: none = released 4096): width of the UNet's bottleneck MLP fc1 -> fc2 -> fc3,
 #                 which holds ~69 M of the ~72 M parameters. model_specs.mlp_dropout adds dropout before fc2 and fc3.
 #                 A smaller width (e.g. 512) is the main lever against overfitting; it rules out warm starts.
+#   model_specs.output (default 'heatmap'): 'cv_residual' = the path is constant velocity (from the last
+#                 cv_vel_frames past frames of the input) PLUS a learned correction from a small head on the UNet
+#                 bottleneck features. The head's last layer starts at zero, so an untrained model is exactly
+#                 constant velocity. The heat-maps are still produced and trained (auxiliary losses) but not used
+#                 for the path. Rules out warm starts.
 # =====================================================================================================
 import torch
 from torch import nn
@@ -85,6 +90,20 @@ class PathUNet(nn.Module):
             self.pathnet.fc2 = nn.Sequential(nn.Dropout(p), nn.Linear(self.mlp_width, self.mlp_width))
             self.pathnet.fc3 = nn.Sequential(nn.Dropout(p), nn.Linear(self.mlp_width, n_out))
 
+        # Constant velocity + learned correction. The head is a submodule of the UNet so it is saved in pathnet_N.pt.
+        # Its input is the UNet bottleneck (conv features before the MLP) plus [past root xy, pose feature].
+        self.output = ms.get('output', 'heatmap')
+        if self.output not in ('heatmap', 'cv_residual'):
+            raise ValueError(f"unknown model_specs.output: {self.output!r} (heatmap | cv_residual)")
+        if self.output == 'cv_residual':
+            self.cv_vel_frames = ms.get('cv_vel_frames', 4)
+            w = ms.get('cv_head_width', 256)
+            head = nn.Sequential(nn.Linear(self.pathnet.fc1.in_features, w), nn.ReLU(),
+                                 nn.Dropout(ms.get('mlp_dropout', 0.0)), nn.Linear(w, self.n_pred * 2))
+            nn.init.zeros_(head[-1].weight)
+            nn.init.zeros_(head[-1].bias)
+            self.pathnet.cv_head = head
+
     def _make_pose_encoder(self, cfg):
         ms = cfg['model_specs']
         if self.pose_input == 'learned':
@@ -103,7 +122,16 @@ class PathUNet(nn.Module):
         extra = [traj_hist.reshape(bs, -1)]
         if self.pose_input != 'none':
             extra.append(self.pathnet.pose_encoder(pose))
-        traj_map_pred, _ = self.pathnet(maps, torch.cat(extra, dim=1))
+        extra = torch.cat(extra, dim=1)
+        traj_map_pred, bottleneck = self.pathnet(maps, extra)
+        if self.output == 'cv_residual':
+            # Velocity of THIS window, measured on its own past: average over the last cv_vel_frames frames (0.8 s).
+            k = self.cv_vel_frames
+            vel = (traj_hist[:, -1] - traj_hist[:, -1 - k]) / k
+            steps = torch.arange(1, self.n_pred + 1, device=pose.device, dtype=pose.dtype)
+            traj_cv = traj_hist[:, -1:] + vel[:, None, :] * steps[None, :, None]
+            correction = self.pathnet.cv_head(torch.cat((bottleneck.reshape(bs, -1), extra), dim=1))
+            return {'traj': traj_cv + correction.reshape(bs, self.n_pred, 2), 'traj_map': traj_map_pred}
         traj_pred = map2traj(traj_map_pred, self.max_dist_from_human, self.resol, self.device)
         return {'traj': traj_pred.float(), 'traj_map': traj_map_pred}
 
@@ -122,6 +150,8 @@ class PathUNet(nn.Module):
             raise ValueError('traj_map_input: false changes the first conv layer; train it from scratch (INIT="none")')
         if self.mlp_width:
             raise ValueError('mlp_width changes the bottleneck MLP; train it from scratch (INIT="none")')
+        if self.output != 'heatmap':
+            raise ValueError('output: cv_residual adds a new head; train it from scratch (INIT="none")')
         sd = torch.load(path, map_location='cpu')
         if self.pose_input == 'none':
             self.pathnet.load_state_dict(sd)

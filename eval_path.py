@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader
 
 from datasets.dataset_gta import DatasetGTA
 from models.path_models import get_path_model
-from utils.path_utils import (apply_overrides, apply_test_seq, format_table, load_cfg, predict, score,
+from utils.path_utils import (apply_overrides, apply_test_seq, constant_velocity, format_table, load_cfg, predict, score,
                               set_seed, summarize, write_per_window_csv)
 from utils.sequence_order import temporal_rank
 
@@ -83,6 +83,19 @@ def main(args):
     print(f"ground truth itself in occupied cells: {sc['gt_collision'].mean() * 100:.1f}% of points "
           f"(reference for coll%)")
 
+    # Error per future frame (0.2 s ... 3.0 s): shows WHERE in the horizon a model fails (e.g. the near future).
+    cv_pred = constant_velocity(res['hist'], cfg['dataset_specs']['n_pred'], sc['thresholds']['vel_frames'])
+    err_m = np.linalg.norm(res['pred'] - res['gt'], axis=-1) * 1000
+    err_cv = np.linalg.norm(cv_pred - res['gt'], axis=-1) * 1000
+    per_frame = {}
+    print(f"\nerror per future frame (mm), frames at {', '.join(f'{(t + 1) * 0.2:.1f}' for t in range(err_m.shape[1]))} s")
+    for s_name in ('all', 'straight', 'turn'):
+        mask = sc['labels'][s_name]
+        if mask.any():
+            per_frame[s_name] = {'model': err_m[mask].mean(0).round(1).tolist(), 'cv': err_cv[mask].mean(0).round(1).tolist()}
+            print(f"  {s_name:9s} model: " + ' '.join(f'{v:5.0f}' for v in err_m[mask].mean(0)))
+            print(f"  {'':9s} CV:    " + ' '.join(f'{v:5.0f}' for v in err_cv[mask].mean(0)))
+
     # Per-window time stamps (the .npz files store windows shuffled), for paired / block-bootstrap comparisons.
     root_idx = cfg['dataset_specs']['root_idx']
     ranks = {dataset.idx2scene[sub]: temporal_rank(dataset.pose[sub], root_idx)[0] for sub in dataset.pose}
@@ -96,7 +109,7 @@ def main(args):
         json.dump({'model_name': cfg['model_name'], 'pose_input': cfg['model_specs'].get('pose_input'),
                    'ckpt': ckpt, 'test_seqs': test_seqs, 'n_windows': len(res['keys']),
                    'thresholds': sc['thresholds'], 'gt_collision': float(sc['gt_collision'].mean()),
-                   'model': summary, 'constant_velocity': summary_cv}, f, indent=1)
+                   'model': summary, 'constant_velocity': summary_cv, 'per_frame_mm': per_frame}, f, indent=1)
     columns = {'seq': [s for s, _ in seq_fidx], 'fidx': [int(i) for _, i in seq_fidx], 't_rank': t_rank}
     columns.update(sc['features'])
     columns.update(sc['labels'])
