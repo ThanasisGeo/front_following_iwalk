@@ -38,6 +38,7 @@ from tqdm import tqdm
 
 from datasets.dataset_gta import DatasetGTA
 from models.path_models import get_path_model
+from utils.augment import mirror_batch
 from utils.path_utils import load_cfg, predict, score, seed_worker, set_seed, summarize
 from utils.sequence_order import temporal_rank
 
@@ -174,6 +175,9 @@ def main(args):
             torch.cuda.set_rng_state_all(state['rng']['cuda'])
 
     save_freq = args.save_freq or cfg.get('save_freq', 100)
+    mirror_p = float((cfg.get('augment') or {}).get('mirror', 0.0))
+    if mirror_p:
+        print(f'augmentation: left/right mirror with probability {mirror_p}')
     log_path = os.path.join(run_dir, 'train_metrics.csv')
     log_fields = ['epoch', 'lr', 'train_loss', 'loss_terms', 'val_ade', 'val_fde', 'val_turn_n', 'val_turn_ade',
                   'val_turn_fde', 'val_cv_fde', 'seconds']
@@ -189,6 +193,8 @@ def main(args):
         for b, (poses_inp, poses_label) in enumerate(tqdm(loader_train, desc=f'epoch {epoch}', leave=False)):
             if args.max_train_batches and b >= args.max_train_batches:
                 break
+            if mirror_p:  # left/right mirror augmentation (training batches only), see utils/augment.py
+                poses_inp, poses_label = mirror_batch(poses_inp, poses_label, mirror_p, cfg['dataset_specs']['n_joints'])
             optimizer.zero_grad()
             loss, terms = path_loss(model(poses_inp), poses_label, cfg)
             loss.backward()
