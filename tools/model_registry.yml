@@ -1,0 +1,24 @@
+# Models that tools/export_predictions.py can run, by short name.
+# To add a model: give it a name, then EITHER `run:` (a results/<run> folder that contains config.yml and models/)
+# OR `cfg:` (a cfg name, for models without a run folder), plus `ckpt:` (path to the .pt file).
+# `label` is what the viewer shows. `default: true` models are exported when --models is not given.
+# A model trained on a sequence is marked "seen" for that sequence (from its cfg train list) so the viewer can warn.
+
+authors:
+  cfg: real_PathUNet
+  ckpt: results/real_Path_GRU_exp/models/pathnet_3600.pt
+  label: "Authors' PathNet"
+  default: true
+
+small_cv_s0:
+  run: results/real_PathUNetPoseSmallCV_m1smallcv_s0
+  cfg: real_PathUNetPoseSmallCV          # this run folder has no config.yml; the cfg file is identical
+  ckpt: results/real_PathUNetPoseSmallCV_m1smallcv_s0/models/pathnet_400.pt
+  label: "Small+pose+CV (s0)"
+  default: true
+
+mirror_s1:
+  run: results/real_PathUNetPoseSmallCV_cv5_mirror_s1_fme_f2_seq1_raw
+  ckpt: results/real_PathUNetPoseSmallCV_cv5_mirror_s1_fme_f2_seq1_raw/models/pathnet_best.pt
+  label: "Small+pose+CV+mirror (s1)"
+  default: true
