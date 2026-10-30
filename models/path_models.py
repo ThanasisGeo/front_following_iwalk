@@ -24,6 +24,9 @@
 #                 bottleneck features. The head's last layer starts at zero, so an untrained model is exactly
 #                 constant velocity. The heat-maps are still produced and trained (auxiliary losses) but not used
 #                 for the path. Rules out warm starts.
+#   model_specs.aux_decoder (default true): false (cv_residual only) = no heat-maps at all. The bottleneck MLP and
+#                 the UNet decoder are removed; what remains is the UNet encoder, the pose encoder and the
+#                 correction head. forward() then returns only 'traj'.
 # =====================================================================================================
 import torch
 from torch import nn
@@ -104,6 +107,22 @@ class PathUNet(nn.Module):
             nn.init.zeros_(head[-1].bias)
             self.pathnet.cv_head = head
 
+        # No auxiliary branch: delete the bottleneck MLP and the decoder, so they are neither trained nor saved.
+        self.aux_decoder = ms.get('aux_decoder', True)
+        if not self.aux_decoder:
+            if self.output != 'cv_residual':
+                raise ValueError('aux_decoder: false needs output: cv_residual (otherwise the path comes from the heat-maps)')
+            for name in ('fc1', 'fc2', 'fc3', 'upconv3', 'decoder3', 'upconv2', 'decoder2', 'upconv1', 'decoder1', 'conv'):
+                delattr(self.pathnet, name)
+
+    def _encode(self, maps):
+        # The encoder half of UNet.forward (same input folding): (B, C, H, W, 1) maps -> conv bottleneck (B, 8f, 5, 5).
+        u = self.pathnet
+        bs, n_inp, h, w, chn = maps.shape
+        x = maps.permute((0, 2, 3, 1, 4)).reshape((bs, h, w, -1)).permute((0, 3, 1, 2))
+        enc3 = u.encoder3(u.pool2(u.encoder2(u.pool1(u.encoder1(x)))))
+        return u.bottleneck(u.pool3(enc3))
+
     def _make_pose_encoder(self, cfg):
         ms = cfg['model_specs']
         if self.pose_input == 'learned':
@@ -123,7 +142,10 @@ class PathUNet(nn.Module):
         if self.pose_input != 'none':
             extra.append(self.pathnet.pose_encoder(pose))
         extra = torch.cat(extra, dim=1)
-        traj_map_pred, bottleneck = self.pathnet(maps, extra)
+        if self.aux_decoder:
+            traj_map_pred, bottleneck = self.pathnet(maps, extra)
+        else:
+            bottleneck = self._encode(maps)
         if self.output == 'cv_residual':
             # Velocity of THIS window, measured on its own past: average over the last cv_vel_frames frames (0.8 s).
             k = self.cv_vel_frames
@@ -131,7 +153,10 @@ class PathUNet(nn.Module):
             steps = torch.arange(1, self.n_pred + 1, device=pose.device, dtype=pose.dtype)
             traj_cv = traj_hist[:, -1:] + vel[:, None, :] * steps[None, :, None]
             correction = self.pathnet.cv_head(torch.cat((bottleneck.reshape(bs, -1), extra), dim=1))
-            return {'traj': traj_cv + correction.reshape(bs, self.n_pred, 2), 'traj_map': traj_map_pred}
+            out = {'traj': traj_cv + correction.reshape(bs, self.n_pred, 2)}
+            if self.aux_decoder:
+                out['traj_map'] = traj_map_pred
+            return out
         traj_pred = map2traj(traj_map_pred, self.max_dist_from_human, self.resol, self.device)
         return {'traj': traj_pred.float(), 'traj_map': traj_map_pred}
 

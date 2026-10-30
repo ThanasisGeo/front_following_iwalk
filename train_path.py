@@ -62,6 +62,10 @@ def path_loss(out, label, cfg):
         terms['traj'] = F.mse_loss(traj, gt) * loss_cfg.get('weight_traj', 1.0)
     if loss_cfg.get('use_final_pos', True):
         terms['final_pos'] = F.mse_loss(traj[:, -1], gt[:, -1]) * loss_cfg.get('weight_final_pos', 1.0)
+    if loss_cfg.get('use_obstacle', False):
+        occ = label['env']['map'][:, 0, :, :, 0].to(dev).float()
+        terms['obstacle'] = obstacle_loss(traj, occ, loss_cfg.get('obstacle_margin', 0.2),
+                                          cfg['dataset_specs']['map_extent']) * loss_cfg.get('weight_obstacle', 1.0)
     if 'traj_map' in out:
         if loss_cfg.get('use_traj_map', False):
             bce = nn.BCELoss(weight=torch.tensor(loss_cfg['weight_bce'], device=dev))
@@ -72,6 +76,20 @@ def path_loss(out, label, cfg):
             occ = label['env']['map'].to(dev).float().abs()
             terms['collision'] = (occ * out['traj_map']).mean() * loss_cfg.get('weight_collision', 1.0)
     return sum(terms.values()), {k: v.item() for k, v in terms.items()}
+
+
+def obstacle_loss(traj, occ, margin, extent):
+    # Penalise predicted path points closer than `margin` metres to an obstacle: mean over points of
+    # relu(margin - distance to the nearest occupied cell centre)^2. Obstacles are binary (occupancy >= 0.5);
+    # free and unknown (-0.01) cells never count. occ: (B, n, n) with row = y, column = x, covering +-extent.
+    # Unlike an "inside an occupied cell" indicator (gradient zero everywhere), this pushes points away smoothly.
+    n = occ.shape[-1]
+    c = (torch.arange(n, device=traj.device, dtype=traj.dtype) + 0.5) * (2 * extent / n) - extent
+    y, x = torch.meshgrid(c, c, indexing='ij')
+    cells = torch.stack((x, y), -1).reshape(-1, 2)                         # (n*n, 2), same order as occ.reshape
+    dist = ((traj[:, :, None] - cells).pow(2).sum(-1) + 1e-12).sqrt()     # (B, n_pred, n*n)
+    dist = dist.masked_fill(occ.reshape(len(occ), 1, -1) < 0.5, float('inf'))
+    return F.relu(margin - dist.min(-1).values).pow(2).mean()
 
 
 def split_train_val(dataset, val_frac, root_idx, n_total):

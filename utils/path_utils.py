@@ -143,7 +143,9 @@ def score(res, cfg):
     # constant-velocity baseline, turn features + labels, and the ground truth's own collision rate (a sanity
     # reference for how coarse the occupancy maps are).
     ds, th = cfg['dataset_specs'], get_thresholds(cfg)
-    d, size = ds['max_dist_from_human'], ds['map_size']
+    # map_extent: half-size of the stored maps (2.5 m). Older cfgs lack it and fall back to max_dist_from_human (4),
+    # which puts the collision metric on the wrong cells.
+    d, size = ds.get('map_extent', ds['max_dist_from_human']), ds['map_size']
     feats = turn_features(res['hist'], res['gt'], th)
     cv = constant_velocity(res['hist'], ds['n_pred'], th['vel_frames'])
     return {

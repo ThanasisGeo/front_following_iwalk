@@ -1,0 +1,68 @@
+# Small CV model WITHOUT Branch B (no heat-map decoder) + obstacle loss on the predicted path.
+# Same as real_PathUNetPoseSmallCV with mirror augmentation, otherwise. Compare with that cfg's mirror runs.
+dataset: Real_IM
+model_name: PathUNetPose
+model_specs:
+  n_feats_unet: 16          # half-width convolutions (32 = released size)
+  n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
+  mlp_width: 512            # only keeps the (then deleted) bottleneck MLP small while the model is built
+  mlp_dropout: 0.2          # dropout inside the correction head
+  output: cv_residual       # path = constant velocity + learned correction
+  aux_decoder: false        # no Branch B: bottleneck MLP and UNet decoder removed
+  cv_vel_frames: 4          # velocity from the last 4 past frames (0.8 s) of each window
+  cv_head_width: 256        # hidden width of the correction head
+  pose_input: learned       # learned pose-history encoder (M1)
+  n_feats_pose_path: 128    # size of the learned pose feature fed into the UNet bottleneck
+
+dataset_specs:
+  n_hist: 15
+  n_pred: 15
+  n_joints: 18
+  data_file: ../data/Real-IM-Dataset-processed/
+  max_dist_from_human: 4
+  map_extent: 2.5           # the stored maps cover +-2.5 m (0.125 m cells); used by the obstacle loss and the collision metric
+  num_scene_points: 50000
+  step: 1
+
+  root_idx: 17
+  left_hip_idx: 11
+  right_hip_idx: 12
+
+  use_raw_obs: false
+  use_env_pcd: false
+  use_map: true
+  use_traj_map: true
+  use_pose_gt: false
+  map_size: 40              # hard-coded 5x5 bottleneck in the UNet: must stay 40
+  z_min: -1.0
+  z_max: 0.5
+  z_floor: -0.3
+
+  train: ['kl_f2_seq1_raw', 'kl_f4_seq2_raw', 'me_f2_seq2_raw', 'op_seq3_raw']
+  test: ['me_f2_seq1_raw']
+
+loss:
+  use_traj: true
+  use_final_pos: true
+  use_traj_map: false       # no heat-maps any more
+  use_collision: false      # (heat-map collision term)
+  use_obstacle: true        # predicted path points closer than obstacle_margin to an occupied cell are penalised
+  obstacle_margin: 0.2      # metres to the cell centre; the true path is closer than this in only 1% of training windows
+  weight_obstacle: 10.0
+  weight_traj: 1
+  weight_final_pos: 1
+
+turns:                      # turn detection thresholds (utils/turns.py DEFAULT_THRESHOLDS)
+  turn_lat: 0.75
+  turn_heading: 30.0
+  straight_lat_max: 0.5
+  hist_curv_new: 15.0
+  onset_lat: 0.25
+
+lr: 0.0001                  # from scratch (small models cannot warm start)
+lr_step_size: 200           # LR x0.1 at epochs 200 and 400 (train ~400 epochs)
+lr_gamma: 0.1
+weight_decay: 0.0001        # AdamW weight decay (0 = plain Adam)
+augment:
+  mirror: 0.5               # left/right mirror augmentation (the best variant of the sweep)
+save_freq: 100
