@@ -3,7 +3,7 @@
 # =====================================================================================================
 # Reads the raw trials (UPtor/darko/data/<trial>.npy, one row per frame: [time ms, flag, 30 joints x (x,y,z)],
 # metres, z up, 15 Hz) and returns the SAME batch dict as datasets/dataset_gta.py, so train_path.py,
-# eval_path.py and models/path_models.py run unchanged. Plan: UPtor/DARKO_training_plan.md
+# eval_path.py and models/path_models.py run unchanged. Plan: UPtor/training_plan.md
 #
 # Per window (n_hist + n_pred consecutive frames of one trial, stride 1 frame):
 #   * joints -> our 18 (COCO-17 order + root). Root (joint 17) = DARKO pelvis by default (the joint the paper
@@ -59,6 +59,7 @@ class DatasetDARKO(Dataset):
         self.root_idx = ds['root_idx']
         self.heading_frames = ds.get('heading_frames', 3)
         self.map_extent, self.map_size = ds['map_extent'], ds['map_size']
+        self.use_traj_map = ds.get('use_traj_map', True)  # false: skip the past-path maps (models without maps)
         self.root_joint = ds.get('root_joint', 'pelvis')
         if self.root_joint not in ('pelvis', 'hip_mid'):
             raise ValueError(f"dataset_specs.root_joint must be 'pelvis' or 'hip_mid', got {self.root_joint!r}")
@@ -101,7 +102,9 @@ class DatasetDARKO(Dataset):
         pose_a_mat = torch.eye(4)                                       # actor -> world, as in Real-IM
         pose_a_mat[:3, :3], pose_a_mat[:3, 3] = torch.from_numpy(R.T.copy()), torch.from_numpy(origin)
         n = self.map_size
-        traj_map = traj2map(pose_hist[None, :, self.root_idx, :2], self.map_extent, 2 * self.map_extent / n,
-                            (1, self.n_hist, n, n, 1), device=torch.device('cpu'))[0].float()
+        hist = {'pose': pose_hist}
+        if self.use_traj_map:
+            hist['traj_map'] = traj2map(pose_hist[None, :, self.root_idx, :2], self.map_extent, 2 * self.map_extent / n,
+                                        (1, self.n_hist, n, n, 1), device=torch.device('cpu'))[0].float()
         env = {'pose_a_mat': pose_a_mat, 'item_key': f'{name}.{s}', 'map': torch.full((1, n, n, 1), UNKNOWN)}
-        return {'env': env, 'pose': {'pose': pose_hist, 'traj_map': traj_map}}, {'env': env, 'pose': {'pose': pose_label}}
+        return {'env': env, 'pose': hist}, {'env': env, 'pose': {'pose': pose_label}}

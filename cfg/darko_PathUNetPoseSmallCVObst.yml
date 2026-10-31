@@ -1,5 +1,5 @@
 # v2 model (real_PathUNetPoseSmallCVObst) on DARKO with the UPTor paper's protocol: 15 Hz, 1 s history (15 frames)
-# -> 2 s prediction (30 frames), scored on the root (pelvis). Plan: ../UPtor/DARKO_training_plan.md
+# -> 2 s prediction (30 frames), scored on the root (pelvis). Plan: ../UPtor/training_plan.md
 # Changes from the Real-IM cfg: rate/horizon, pelvis root, no obstacle loss (no maps), Euclidean-distance loss,
 # turn thresholds scaled to the 2-s horizon, fewer epochs (6-7x more windows per epoch).
 dataset: DARKO

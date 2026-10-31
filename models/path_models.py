@@ -27,6 +27,9 @@
 #   model_specs.aux_decoder (default true): false (cv_residual only) = no heat-maps at all. The bottleneck MLP and
 #                 the UNet decoder are removed; what remains is the UNet encoder, the pose encoder and the
 #                 correction head. forward() then returns only 'traj'.
+#   model_specs.map_input (default 'unet'): 'none' (cv_residual, aux_decoder: false only) = no UNet and no maps at
+#                 all, for datasets without occupancy maps (DARKO). The correction head reads only [past root xy,
+#                 pose feature]; the past-path maps would only repeat the root xy.
 # =====================================================================================================
 import torch
 from torch import nn
@@ -115,6 +118,27 @@ class PathUNet(nn.Module):
             for name in ('fc1', 'fc2', 'fc3', 'upconv3', 'decoder3', 'upconv2', 'decoder2', 'upconv1', 'decoder1', 'conv'):
                 delattr(self.pathnet, name)
 
+        # No maps: replace the UNet by a plain container holding only the pose encoder and a correction head sized
+        # for [past root xy, pose feature]. It is still called `pathnet`, so save_ckpt / load_ckpt work unchanged.
+        self.map_input = ms.get('map_input', 'unet')
+        if self.map_input not in ('unet', 'none'):
+            raise ValueError(f"unknown model_specs.map_input: {self.map_input!r} (unet | none)")
+        if self.map_input == 'none':
+            if self.aux_decoder or self.output != 'cv_residual':
+                raise ValueError('map_input: none needs output: cv_residual and aux_decoder: false')
+            container = nn.Module()
+            n_in = self.n_hist * 2
+            if self.pose_input != 'none':
+                container.pose_encoder = self.pathnet.pose_encoder
+                n_in += container.pose_encoder.out_dim
+            w = ms.get('cv_head_width', 256)
+            head = nn.Sequential(nn.Linear(n_in, w), nn.ReLU(), nn.Dropout(ms.get('mlp_dropout', 0.0)),
+                                 nn.Linear(w, self.n_pred * 2))
+            nn.init.zeros_(head[-1].weight)
+            nn.init.zeros_(head[-1].bias)
+            container.cv_head = head
+            self.pathnet = container
+
     def _encode(self, maps):
         # The encoder half of UNet.forward (same input folding): (B, C, H, W, 1) maps -> conv bottleneck (B, 8f, 5, 5).
         u = self.pathnet
@@ -131,10 +155,11 @@ class PathUNet(nn.Module):
 
     def forward(self, poses_inp):
         pose = poses_inp['pose']['pose'].to(self.device).float()           # (B, n_hist, J, 3) past skeletons
-        maps = poses_inp['env']['map'].to(self.device).float()              # (B, 1, H, W, 1) occupancy
-        if self.traj_map_input:
-            traj_map_hist = poses_inp['pose']['traj_map'].to(self.device).float()  # (B, n_hist, H, W, 1)
-            maps = torch.cat((maps, traj_map_hist), dim=1)
+        if self.map_input != 'none':
+            maps = poses_inp['env']['map'].to(self.device).float()          # (B, 1, H, W, 1) occupancy
+            if self.traj_map_input:
+                traj_map_hist = poses_inp['pose']['traj_map'].to(self.device).float()  # (B, n_hist, H, W, 1)
+                maps = torch.cat((maps, traj_map_hist), dim=1)
         bs = pose.shape[0]
 
         traj_hist = pose[:, :, self.root_idx, :2]
@@ -142,7 +167,9 @@ class PathUNet(nn.Module):
         if self.pose_input != 'none':
             extra.append(self.pathnet.pose_encoder(pose))
         extra = torch.cat(extra, dim=1)
-        if self.aux_decoder:
+        if self.map_input == 'none':
+            bottleneck = extra.new_zeros(bs, 0)                             # nothing from maps
+        elif self.aux_decoder:
             traj_map_pred, bottleneck = self.pathnet(maps, extra)
         else:
             bottleneck = self._encode(maps)
