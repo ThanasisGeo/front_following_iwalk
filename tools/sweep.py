@@ -4,16 +4,20 @@
 # =====================================================================================================
 #   python tools/sweep.py --cfg real_PathUNetPoseSmallCV --name cv5 --seeds 0 1 2 --folds all --mirror both
 #
-# For every combination it runs train_path.py (--test_seq <fold>) and eval_path.py (best + last checkpoint):
+# For every combination it runs train_path.py (--test_seq <fold>, or for DARKO --set dataset_specs.test_fold=<fold>)
+# and eval_path.py (best + last checkpoint):
 #   run folder  results/<cfg>_<name>_<variant>_s<seed>_f<fold>/   (train log in train_stdout.txt)
-#   variants    base (no augmentation) and/or mirror (cfg augment.mirror=0.5)
-#   folds       each sequence becomes the test set once, the other four are used for training/validation
+#   variants    base (no augmentation, augment.mirror=0) and/or mirror (augment.mirror=0.5)
+#   folds       Real-IM: each sequence becomes the test set once, the other four are used for training/validation.
+#               DARKO: fold k = trial fold k of dataset_specs.n_folds (--set dataset_specs.test_fold=k); every
+#               trial is a test trial exactly once over the n_folds folds.
 # Finished runs (both evals present) are skipped, unfinished ones resume from trainstate_last.pt, so the same
 # command can be re-run in a new session. After a run completes, its trainstate is deleted (only
 # pathnet_best.pt and pathnet_<epochs>.pt are kept, ~40 MB per run).
 #
-# Pooling: for each variant / checkpoint / seed, the per-window results of the 5 folds are concatenated. Every
-# window of the dataset is then a test window exactly once (all ~1800 windows, ~86+ turns instead of 26).
+# Pooling: for each variant / checkpoint / seed, the per-window results of all folds are concatenated. Every
+# window of the dataset is then a test window exactly once (Real-IM: all ~1800 windows, ~86+ turns instead of 26;
+# DARKO: all ~11.8K windows of the 508 trials).
 # The summary reports mean +- std over seeds, plus constant velocity on the same windows.
 #   results/sweep_<name>/summary.md, summary.csv
 # SIGTERM (e.g. Kaggle's timeout) stops after the current run's training has saved; the summary covers the
@@ -30,11 +34,11 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.path_utils import load_cfg  # noqa: E402
+from utils.path_utils import load_cfg, test_set_name  # noqa: E402
 
 SUBSETS = ['all', 'straight', 'turn', 'turn_heading', 'turn_new', 'turn_ongoing']
-METRICS = [('ade', 'ADE'), ('fde', 'FDE'), ('err_1s', '@1s'), ('err_2s', '@2s'), ('lat_err', 'sideways@3s')]
-VARIANTS = {'base': [], 'mirror': ['augment.mirror=0.5']}
+METRICS = [('ade', 'ADE'), ('fde', 'FDE'), ('err_1s', '@1s'), ('err_2s', '@2s'), ('lat_err', 'sideways@end')]
+VARIANTS = {'base': ['augment.mirror=0'], 'mirror': ['augment.mirror=0.5']}
 STOP = {'requested': False}
 
 
@@ -47,8 +51,18 @@ def run_dir(cfg, exp):
     return os.path.join('results', f'{cfg}_{exp}')
 
 
+def fold_args(cfg_name, fold):
+    # train/eval arguments that select a fold, and the test-set name eval_path.py uses in its output folder.
+    cfg = load_cfg(cfg_name)
+    if cfg['dataset'] == 'DARKO':
+        over = [f'dataset_specs.test_fold={fold}']
+        cfg['dataset_specs']['test_fold'] = int(fold)
+        return [], over, test_set_name(cfg)
+    return ['--test_seq', fold], [], fold
+
+
 def per_window_path(cfg, exp, ckpt, fold):
-    return os.path.join(run_dir(cfg, exp), 'eval', f'pathnet_{ckpt}_{fold}', 'per_window.csv')
+    return os.path.join(run_dir(cfg, exp), 'eval', f'pathnet_{ckpt}_{fold_args(cfg, fold)[2]}', 'per_window.csv')
 
 
 def read_per_window(path):
@@ -68,10 +82,11 @@ def one_run(args, variant, seed, fold, py):
     trainstate = os.path.join(rdir, 'models', 'trainstate_last.pt')
     final = os.path.join(rdir, 'models', f'pathnet_{args.epochs:03d}.pt')
     if not os.path.exists(final) or os.path.exists(trainstate):
-        cmd = [py, '-u', 'train_path.py', '--cfg', args.cfg, '--exp', exp, '--seed', str(seed), '--test_seq', fold,
+        fold_cli, fold_set, _ = fold_args(args.cfg, fold)
+        cmd = [py, '-u', 'train_path.py', '--cfg', args.cfg, '--exp', exp, '--seed', str(seed)] + fold_cli + [
                '--epochs', str(args.epochs), '--batch_size', str(args.batch_size), '--select', args.select,
                '--num_workers', str(args.num_workers), '--save_freq', str(args.epochs)]
-        overrides = VARIANTS[variant] + args.set
+        overrides = VARIANTS[variant] + fold_set + args.set
         if overrides:
             cmd += ['--set'] + overrides
         if os.path.exists(trainstate):
@@ -171,9 +186,14 @@ def main():
     os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
-    ds = load_cfg(args.cfg)['dataset_specs']
-    seqs = list(ds['train']) + [s for s in ds['test'] if s not in ds['train']]
-    folds = seqs if args.folds == ['all'] else (list(ds['test']) if args.folds == ['default'] else args.folds)
+    cfg = load_cfg(args.cfg)
+    ds = cfg['dataset_specs']
+    if cfg['dataset'] == 'DARKO':
+        seqs, default = [str(k) for k in range(ds.get('n_folds', 7))], [str(ds.get('test_fold', 0))]
+    else:
+        seqs = list(ds['train']) + [s for s in ds['test'] if s not in ds['train']]
+        default = list(ds['test'])
+    folds = seqs if args.folds == ['all'] else (default if args.folds == ['default'] else args.folds)
 
     if not args.summary_only:
         jobs = [(v, s, f) for s in args.seeds for v in args.variants for f in folds]  # seed-major: complete seeds first
