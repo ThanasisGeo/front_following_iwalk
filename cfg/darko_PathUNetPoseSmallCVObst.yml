@@ -1,0 +1,68 @@
+# v2 model (real_PathUNetPoseSmallCVObst) on DARKO with the UPTor paper's protocol: 15 Hz, 1 s history (15 frames)
+# -> 2 s prediction (30 frames), scored on the root (pelvis). Plan: ../UPtor/DARKO_training_plan.md
+# Changes from the Real-IM cfg: rate/horizon, pelvis root, no obstacle loss (no maps), Euclidean-distance loss,
+# turn thresholds scaled to the 2-s horizon, fewer epochs (6-7x more windows per epoch).
+dataset: DARKO
+model_name: PathUNetPose
+model_specs:
+  n_feats_unet: 16          # half-width convolutions (32 = released size)
+  n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
+  mlp_width: 512            # only keeps the (then deleted) bottleneck MLP small while the model is built
+  mlp_dropout: 0.2          # dropout inside the correction head
+  output: cv_residual       # path = constant velocity + learned correction
+  aux_decoder: false        # no Branch B
+  cv_vel_frames: 12         # velocity from the last 12 past frames (0.8 s at 15 Hz)
+  cv_head_width: 256        # hidden width of the correction head (output: 30 frames x 2)
+  pose_input: learned       # learned pose-history encoder
+  n_feats_pose_path: 128
+
+dataset_specs:
+  data_file: ../data/DARKO/  # the trial .npy files (UPtor/darko/data), relative to datasets/
+  hz: 15                    # frames per second (67 ms steps)
+  n_hist: 15                # 1.0 s
+  n_pred: 30                # 2.0 s
+  n_joints: 18              # COCO-17 order + root
+  root_idx: 17
+  root_joint: pelvis        # pelvis (the joint the paper scores) | hip_mid (as Real-IM)
+  left_hip_idx: 11
+  right_hip_idx: 12
+  heading_frames: 3         # actor frame +x = root motion over the last 3 frames (0.2 s), as for Real-IM
+  max_dist_from_human: 4    # read by the model code; the maps themselves cover map_extent
+  map_extent: 2.5           # past-path maps cover +-2.5 m (0.125 m cells), as for Real-IM
+  map_size: 40              # hard-coded 5x5 bottleneck in the UNet: must stay 40
+  use_map: true             # (occupancy is all "unknown": DARKO has no maps)
+  use_traj_map: true
+  # split by trial: shuffle with split_seed, n_folds folds, fold test_fold = test (1/7 ~ the paper's 5K of 35K
+  # frames), val_frac of the remaining trials = validation. K-fold later: --set dataset_specs.test_fold=k
+  split_seed: 0
+  n_folds: 7
+  test_fold: 0
+  val_frac: 0.1
+
+loss:
+  distance: euclidean       # mean distance (what ADE/FDE measure) instead of squared error
+  use_traj: true
+  use_final_pos: true
+  use_traj_map: false
+  use_collision: false
+  use_obstacle: false       # no obstacles in DARKO
+  weight_traj: 1
+  weight_final_pos: 1
+
+turns:                      # Real-IM thresholds (3-s horizon) scaled by 2/3 for the 2-s horizon
+  dt: 0.0667                # s per frame (15 Hz)
+  vel_frames: 12            # 0.8 s, same as constant velocity
+  turn_lat: 0.5
+  turn_heading: 30.0
+  straight_lat_max: 0.33
+  hist_curv_new: 15.0
+  onset_lat: 0.17
+  lat_bins: [0.0, 0.17, 0.5, 1.0]
+
+lr: 0.0001
+lr_step_size: 60            # LR x0.1 at epochs 60 and 120 (train 150 epochs)
+lr_gamma: 0.1
+weight_decay: 0.0001        # AdamW
+augment:
+  mirror: 0.5               # left/right mirror augmentation
+save_freq: 25

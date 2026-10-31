@@ -21,6 +21,22 @@ from utils.turns import BASE_SUBSETS, get_thresholds, lat_bin_names, turn_featur
 HORIZONS = {'err_0.5s': [1, 2], 'err_1s': [4], 'err_1.5s': [7, 8], 'err_2s': [9], 'err_3s': [14]}
 
 
+def get_horizons(ds):
+    # Future-frame indices of the error-at-time metrics. 5 Hz (Real-IM, dataset_specs.hz absent) keeps the fixed
+    # table above, so earlier results stay identical. Other rates: frame i is at (i + 1) / hz s; a time between two
+    # frames averages both. Times beyond the horizon are dropped.
+    hz, n_pred = ds.get('hz', 5), ds['n_pred']
+    if hz == 5:
+        return {k: v for k, v in HORIZONS.items() if max(v) < n_pred}
+    out = {}
+    for t in (0.5, 1.0, 1.5, 2.0, 3.0):
+        x = t * hz - 1
+        idx = sorted({int(np.floor(x + 1e-9)), int(np.ceil(x - 1e-9))})
+        if idx[-1] < n_pred:
+            out[f'err_{t:g}s'] = idx
+    return out
+
+
 # ----------------------------------------------------------------------------- config
 def _parse_override(item):
     key, sep, value = item.partition('=')
@@ -77,16 +93,37 @@ def seed_worker(worker_id):
     random.seed(s)
 
 
+def make_dataset(mode, cfg):
+    # The dataset class for cfg['dataset']. DARKO: mode 'train' | 'val' | 'test' | 'trainval' (by-trial split,
+    # datasets/dataset_darko.py). Real-IM / GTA: 'train' | 'test' (by sequence). Imported lazily: the Real-IM
+    # loader needs open3d, the DARKO one doesn't.
+    if cfg['dataset'] == 'DARKO':
+        from datasets.dataset_darko import DatasetDARKO
+        return DatasetDARKO(mode, cfg)
+    from datasets.dataset_gta import DatasetGTA
+    return DatasetGTA(mode, cfg)
+
+
+def test_set_name(cfg):
+    # Short name of the test set, used in output folder names and printouts.
+    if cfg['dataset'] == 'DARKO':
+        from datasets.dataset_darko import split_name
+        return split_name(cfg['dataset_specs'])
+    return '+'.join(cfg['dataset_specs']['test'])
+
+
 # ----------------------------------------------------------------------------- inference
 @torch.no_grad()
 def predict(model, loader, root_idx):
     # Runs the model over a loader. Returns numpy arrays: pred/gt (N, n_pred, 2), hist (N, n_hist, 2),
     # occ (N, H, W) occupancy map, and keys "<sequence>.<window index>".
     model.eval()
-    out = {'pred': [], 'gt': [], 'hist': [], 'occ': [], 'keys': []}
+    # gt_z: root height of the true future (the actor frame's origin is the root at "now", so 0 = current height).
+    out = {'pred': [], 'gt': [], 'gt_z': [], 'hist': [], 'occ': [], 'keys': []}
     for poses_inp, poses_label in loader:
         out['pred'].append(model(poses_inp)['traj'].cpu().numpy())
         out['gt'].append(poses_label['pose']['pose'][:, :, root_idx, :2].numpy())
+        out['gt_z'].append(poses_label['pose']['pose'][:, :, root_idx, 2].numpy())
         out['hist'].append(poses_inp['pose']['pose'][:, :, root_idx, :2].numpy())
         out['occ'].append(poses_inp['env']['map'][:, 0, :, :, 0].numpy())
         out['keys'] += list(poses_inp['env']['item_key'])
@@ -117,10 +154,10 @@ def collision_stats(points, occ, max_dist, map_size, occupied_thresh=0.5):
     return (occupied & inside).mean(axis=1), (~inside).mean(axis=1)
 
 
-def window_errors(pred, gt, hist, occ=None, max_dist=None, map_size=None, miss_thresh=1.0):
+def window_errors(pred, gt, hist, occ=None, max_dist=None, map_size=None, miss_thresh=1.0, horizons=None):
     e = np.linalg.norm(pred - gt, axis=-1)  # (N, n_pred)
     out = {'ade': e.mean(axis=1), 'fde': e[:, -1]}
-    for name, idx in HORIZONS.items():
+    for name, idx in (horizons or HORIZONS).items():
         out[name] = e[:, idx].mean(axis=1)
 
     true_d, pred_d = gt[:, -1] - hist[:, -1], pred[:, -1] - hist[:, -1]
@@ -146,13 +183,14 @@ def score(res, cfg):
     # map_extent: half-size of the stored maps (2.5 m). Older cfgs lack it and fall back to max_dist_from_human (4),
     # which puts the collision metric on the wrong cells.
     d, size = ds.get('map_extent', ds['max_dist_from_human']), ds['map_size']
+    horizons = get_horizons(ds)
     feats = turn_features(res['hist'], res['gt'], th)
     cv = constant_velocity(res['hist'], ds['n_pred'], th['vel_frames'])
     return {
         'features': feats,
         'labels': turn_labels(feats, th),
-        'errors': window_errors(res['pred'], res['gt'], res['hist'], res['occ'], d, size),
-        'errors_cv': window_errors(cv, res['gt'], res['hist'], res['occ'], d, size),
+        'errors': window_errors(res['pred'], res['gt'], res['hist'], res['occ'], d, size, horizons=horizons),
+        'errors_cv': window_errors(cv, res['gt'], res['hist'], res['occ'], d, size, horizons=horizons),
         'gt_collision': collision_stats(res['gt'], res['occ'], d, size)[0],
         'subsets': subset_names(th),
         'thresholds': th,
@@ -188,7 +226,7 @@ def format_table(summary_model, summary_cv, subsets, model_name='model'):
         lines.append(f"{s:16s} {m['n']:4d} | {'':6s}  {mm(m['ade'])} {mm(m['fde'])} {mm(m['err_1s'])} "
                      f"{mm(m['err_2s'])} {mm(m['lat_err'])} {m['head_err']:6.1f} {m['miss'] * 100:6.1f} {coll} "
                      f"|     {mm(c['ade'])} {mm(c['fde'])}")
-    lines.append('(distances in mm; lat = sideways part of the 3-s endpoint error; CV = constant velocity B0)')
+    lines.append('(distances in mm; lat = sideways part of the endpoint error; CV = constant velocity B0)')
     return '\n'.join(lines)
 
 

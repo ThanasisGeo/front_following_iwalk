@@ -110,6 +110,6 @@ if __name__ == '__main__':
     p.add_argument('--seq', nargs='+', default=['all'], help="sequence name(s), or 'all'")
     p.add_argument('--models', nargs='+', default=None, help='model names from tools/model_registry.yml (default: default ones)')
     p.add_argument('--add', nargs='*', default=[], help='ad hoc model: name=cfg:checkpoint_path')
-    p.add_argument('--out', default=os.path.join(ROOT, '..', '..', 'u_minnesote_dataset_analysis', 'predictions'))
+    p.add_argument('--out', default=os.path.join(ROOT, '..', 'u_minnesote_dataset_analysis', 'predictions'))
     p.add_argument('--num_workers', type=int, default=2)
     main(p.parse_args())

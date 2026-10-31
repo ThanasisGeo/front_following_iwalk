@@ -1,0 +1,54 @@
+model config: results/real_PathUNetPoseSmallCVObst_obst/config.yml
+checkpoint: results/real_PathUNetPoseSmallCVObst_obst/models/pathnet_best.pt
+
+PathUNetPose (pathnet_best.pt) on me_f2_seq1_raw: 440 windows
+subset              n | PathUN:    ADE    FDE    @1s    @2s    lat  head°  miss%  coll% | CV:    ADE    FDE
+-----------------------------------------------------------------------------------------------------------
+all               440 |            196    358    125    234    199    4.2    2.7    0.0 |        231    436
+straight          403 |            180    315    119    213    163    3.2    0.0    0.0 |        199    358
+turn               26 |            427    982    188    526    683   18.0   46.2    0.0 |        681   1543
+turn_heading       20 |            451   1081    185    549    751   19.7   55.0    0.0 |        735   1734
+turn_new            6 |            442   1179    140    516   1148   25.9   50.0    0.0 |        728   1805
+turn_ongoing       20 |            423    923    203    528    543   15.6   45.0    0.0 |        667   1465
+lat_0.00-0.25     322 |            174    306    116    205    145    2.9    0.0    0.0 |        186    330
+lat_0.25-0.75      92 |            209    362    138    253    251    4.9    0.0    0.0 |        262    494
+lat_0.75-1.50      13 |            359    790    168    448    555   14.3   23.1    0.0 |        595   1284
+lat_1.50+          13 |            495   1175    209    603    810   21.7   69.2    0.0 |        768   1803
+(distances in mm; lat = sideways part of the 3-s endpoint error; CV = constant velocity B0)
+ground truth itself in occupied cells: 0.0% of points (reference for coll%)
+
+error per future frame (mm), frames at 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0 s
+  all       model:    52    75    91   109   125   147   172   191   212   234   258   283   307   332   358
+            CV:       54    79    97   120   139   166   197   221   251   279   309   342   375   406   436
+  straight  model:    52    73    88   105   119   140   162   177   195   213   234   255   275   295   315
+            CV:       54    77    93   113   127   149   175   194   217   238   261   287   313   337   358
+  turn      model:    48    81   113   152   188   228   297   372   447   526   606   693   788   883   982
+            CV:       50    97   152   221   301   393   498   611   730   855   986  1122  1263  1400  1543
+saved results/real_PathUNetPoseSmallCVObst_obst/eval/pathnet_best_me_f2_seq1_raw/metrics.json and per_window.csv
+model config: results/real_PathUNetPoseSmallCVObst_obst/config.yml
+checkpoint: results/real_PathUNetPoseSmallCVObst_obst/models/pathnet_400.pt
+
+PathUNetPose (pathnet_400.pt) on me_f2_seq1_raw: 440 windows
+subset              n | PathUN:    ADE    FDE    @1s    @2s    lat  head°  miss%  coll% | CV:    ADE    FDE
+-----------------------------------------------------------------------------------------------------------
+all               440 |            196    356    125    234    197    4.2    2.7    0.0 |        231    436
+straight          403 |            179    314    119    213    162    3.2    0.0    0.0 |        199    358
+turn               26 |            428    977    188    530    668   17.7   46.2    0.0 |        681   1543
+turn_heading       20 |            453   1077    185    554    739   19.5   55.0    0.0 |        735   1734
+turn_new            6 |            434   1159    138    506   1125   25.4   50.0    0.0 |        728   1805
+turn_ongoing       20 |            427    922    203    538    532   15.4   45.0    0.0 |        667   1465
+lat_0.00-0.25     322 |            174    305    116    204    144    2.9    0.0    0.0 |        186    330
+lat_0.25-0.75      92 |            208    359    138    251    247    4.8    0.0    0.0 |        262    494
+lat_0.75-1.50      13 |            360    782    168    453    537   13.9   23.1    0.0 |        595   1284
+lat_1.50+          13 |            497   1172    208    607    800   21.6   69.2    0.0 |        768   1803
+(distances in mm; lat = sideways part of the 3-s endpoint error; CV = constant velocity B0)
+ground truth itself in occupied cells: 0.0% of points (reference for coll%)
+
+error per future frame (mm), frames at 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0 s
+  all       model:    52    75    91   109   125   147   172   191   212   234   257   282   307   331   356
+            CV:       54    79    97   120   139   166   197   221   251   279   309   342   375   406   436
+  straight  model:    52    73    89   105   119   140   162   177   195   213   233   254   274   294   314
+            CV:       54    77    93   113   127   149   175   194   217   238   261   287   313   337   358
+  turn      model:    49    82   113   153   188   237   301   373   451   530   610   695   787   880   977
+            CV:       50    97   152   221   301   393   498   611   730   855   986  1122  1263  1400  1543
+saved results/real_PathUNetPoseSmallCVObst_obst/eval/pathnet_last_me_f2_seq1_raw/metrics.json and per_window.csv

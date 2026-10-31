@@ -36,10 +36,9 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
-from datasets.dataset_gta import DatasetGTA
 from models.path_models import get_path_model
 from utils.augment import mirror_batch
-from utils.path_utils import load_cfg, predict, score, seed_worker, set_seed, summarize
+from utils.path_utils import load_cfg, make_dataset, predict, score, seed_worker, set_seed, summarize
 from utils.sequence_order import temporal_rank
 
 STOP = {'requested': False}
@@ -58,10 +57,16 @@ def path_loss(out, label, cfg):
     dev = traj.device
     gt = label['pose']['pose'][:, :, root_idx, :2].to(dev).float()
     terms = {}
+    # loss.distance: 'mse' (default, squared error as in train.py) or 'euclidean' (mean distance in metres, the
+    # quantity ADE/FDE measure; as in the UPTor paper's L2-norm loss).
+    if loss_cfg.get('distance', 'mse') == 'euclidean':
+        dist = lambda a, b: ((a - b).pow(2).sum(-1) + 1e-9).sqrt().mean()
+    else:
+        dist = F.mse_loss
     if loss_cfg.get('use_traj', True):
-        terms['traj'] = F.mse_loss(traj, gt) * loss_cfg.get('weight_traj', 1.0)
+        terms['traj'] = dist(traj, gt) * loss_cfg.get('weight_traj', 1.0)
     if loss_cfg.get('use_final_pos', True):
-        terms['final_pos'] = F.mse_loss(traj[:, -1], gt[:, -1]) * loss_cfg.get('weight_final_pos', 1.0)
+        terms['final_pos'] = dist(traj[:, -1], gt[:, -1]) * loss_cfg.get('weight_final_pos', 1.0)
     if loss_cfg.get('use_obstacle', False):
         occ = label['env']['map'][:, 0, :, :, 0].to(dev).float()
         terms['obstacle'] = obstacle_loss(traj, occ, loss_cfg.get('obstacle_margin', 0.2),
@@ -156,15 +161,21 @@ def main(args):
     ds = cfg['dataset_specs']
     n_total = ds['n_hist'] + ds['n_pred']
 
-    print('train sequences:', ds['train'], '| test (never used here):', ds['test'])
-    dataset = DatasetGTA('train', cfg)
-    train_idx, val_idx = split_train_val(dataset, args.val_frac, ds['root_idx'], n_total)
+    if cfg['dataset'] == 'DARKO':
+        # By-trial split from the cfg (dataset_specs split_seed / n_folds / test_fold / val_frac), see
+        # datasets/dataset_darko.py. The test fold is never loaded here.
+        train_set, val_set = make_dataset('train', cfg), make_dataset('val', cfg)
+    else:
+        print('train sequences:', ds['train'], '| test (never used here):', ds['test'])
+        dataset = make_dataset('train', cfg)
+        train_idx, val_idx = split_train_val(dataset, args.val_frac, ds['root_idx'], n_total)
+        train_set, val_set = Subset(dataset, train_idx), (Subset(dataset, val_idx) if val_idx else None)
     gen = torch.Generator()
     gen.manual_seed(args.seed)
-    loader_train = DataLoader(Subset(dataset, train_idx), batch_size=args.batch_size, shuffle=True,
+    loader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,
                               num_workers=args.num_workers, worker_init_fn=seed_worker, generator=gen, drop_last=True)
-    loader_val = DataLoader(Subset(dataset, val_idx), batch_size=64, shuffle=False,
-                            num_workers=args.num_workers, worker_init_fn=seed_worker) if val_idx else None
+    loader_val = DataLoader(val_set, batch_size=64, shuffle=False,
+                            num_workers=args.num_workers, worker_init_fn=seed_worker) if val_set is not None else None
 
     model = get_path_model(cfg).to(device)
     if state is None and args.init_released:

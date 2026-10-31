@@ -23,10 +23,9 @@ import torch
 import yaml
 from torch.utils.data import DataLoader
 
-from datasets.dataset_gta import DatasetGTA
 from models.path_models import get_path_model
-from utils.path_utils import (apply_overrides, apply_test_seq, constant_velocity, format_table, load_cfg, predict, score,
-                              set_seed, summarize, write_per_window_csv)
+from utils.path_utils import (apply_overrides, apply_test_seq, constant_velocity, format_table, load_cfg, make_dataset,
+                              predict, score, set_seed, summarize, test_set_name, write_per_window_csv)
 from utils.sequence_order import temporal_rank
 
 
@@ -69,7 +68,7 @@ def main(args):
     model.load_ckpt(ckpt, device)
     print(f'checkpoint: {ckpt}')
 
-    dataset = DatasetGTA('test', cfg)
+    dataset = make_dataset('test', cfg)
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
     res = predict(model, loader, cfg['dataset_specs']['root_idx'])
     sc = score(res, cfg)
@@ -77,18 +76,21 @@ def main(args):
     summary = summarize(sc['errors'], sc['labels'], subsets)
     summary_cv = summarize(sc['errors_cv'], sc['labels'], subsets)
 
-    test_seqs = cfg['dataset_specs']['test']
-    print(f"\n{cfg['model_name']} ({os.path.basename(ckpt)}) on {', '.join(test_seqs)}: {len(res['keys'])} windows")
+    ds = cfg['dataset_specs']
+    test_name = test_set_name(cfg)
+    test_seqs = ds['test'] if cfg['dataset'] != 'DARKO' else sorted(dataset.pose)
+    print(f"\n{cfg['model_name']} ({os.path.basename(ckpt)}) on {test_name}: {len(res['keys'])} windows")
     print(format_table(summary, summary_cv, subsets, model_name=cfg['model_name']))
     print(f"ground truth itself in occupied cells: {sc['gt_collision'].mean() * 100:.1f}% of points "
           f"(reference for coll%)")
 
-    # Error per future frame (0.2 s ... 3.0 s): shows WHERE in the horizon a model fails (e.g. the near future).
-    cv_pred = constant_velocity(res['hist'], cfg['dataset_specs']['n_pred'], sc['thresholds']['vel_frames'])
+    # Error per future frame (0.2 s ... 3.0 s at 5 Hz): shows WHERE in the horizon a model fails (e.g. the near future).
+    hz = ds.get('hz', 5)
+    cv_pred = constant_velocity(res['hist'], ds['n_pred'], sc['thresholds']['vel_frames'])
     err_m = np.linalg.norm(res['pred'] - res['gt'], axis=-1) * 1000
     err_cv = np.linalg.norm(cv_pred - res['gt'], axis=-1) * 1000
     per_frame = {}
-    print(f"\nerror per future frame (mm), frames at {', '.join(f'{(t + 1) * 0.2:.1f}' for t in range(err_m.shape[1]))} s")
+    print(f"\nerror per future frame (mm), frames at {', '.join(f'{(t + 1) / hz:.2f}' for t in range(err_m.shape[1]))} s")
     for s_name in ('all', 'straight', 'turn'):
         mask = sc['labels'][s_name]
         if mask.any():
@@ -96,20 +98,36 @@ def main(args):
             print(f"  {s_name:9s} model: " + ' '.join(f'{v:5.0f}' for v in err_m[mask].mean(0)))
             print(f"  {'':9s} CV:    " + ' '.join(f'{v:5.0f}' for v in err_cv[mask].mean(0)))
 
-    # Per-window time stamps (the .npz files store windows shuffled), for paired / block-bootstrap comparisons.
-    root_idx = cfg['dataset_specs']['root_idx']
-    ranks = {dataset.idx2scene[sub]: temporal_rank(dataset.pose[sub], root_idx)[0] for sub in dataset.pose}
+    # Paper-style root error (UPTor Table II: ADE_Tr / FDE_Tr on the root joint in 3D). Our models predict x, y
+    # only, so the predicted height is held at the current root height (z = 0 in the actor frame).
+    paper = {}
+    if cfg['dataset'] == 'DARKO':
+        print("\npaper-style root error, 3D (predicted height = current height), all windows:")
+        for name, p in (('model', res['pred']), ('cv', cv_pred)):
+            e = np.sqrt(((p - res['gt']) ** 2).sum(-1) + res['gt_z'] ** 2)
+            paper[name] = {'ade_3d': float(e.mean()), 'fde_3d': float(e[:, -1].mean())}
+            print(f"  {name:6s} ADE_Tr {e.mean():.3f} m   FDE_Tr {e[:, -1].mean():.3f} m")
+        print("  (UPTor paper, DARKO: UPTor 0.13 / 0.26 m, STPOTR 0.17 / 0.34 m; different test trials)")
+
+    # Per-window time stamps, for paired / block-bootstrap comparisons. Real-IM stores windows shuffled, so the
+    # time order is rebuilt; DARKO windows are keyed by their start frame within the trial already.
+    root_idx = ds['root_idx']
     seq_fidx = [k.rsplit('.', 1) for k in res['keys']]
-    t_rank = np.array([ranks[s][int(i)] for s, i in seq_fidx])
+    if cfg['dataset'] == 'DARKO':
+        t_rank = np.array([int(i) for _, i in seq_fidx])
+    else:
+        ranks = {dataset.idx2scene[sub]: temporal_rank(dataset.pose[sub], root_idx)[0] for sub in dataset.pose}
+        t_rank = np.array([ranks[s][int(i)] for s, i in seq_fidx])
 
     tag = os.path.splitext(os.path.basename(ckpt))[0] if os.path.isfile(args.ckpt) else f'pathnet_{args.ckpt}'
-    out_dir = args.out_dir or os.path.join(run_dir, 'eval', f"{tag}_{'+'.join(test_seqs)}")
+    out_dir = args.out_dir or os.path.join(run_dir, 'eval', f"{tag}_{test_name}")
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, 'metrics.json'), 'w') as f:
         json.dump({'model_name': cfg['model_name'], 'pose_input': cfg['model_specs'].get('pose_input'),
                    'ckpt': ckpt, 'test_seqs': test_seqs, 'n_windows': len(res['keys']),
                    'thresholds': sc['thresholds'], 'gt_collision': float(sc['gt_collision'].mean()),
-                   'model': summary, 'constant_velocity': summary_cv, 'per_frame_mm': per_frame}, f, indent=1)
+                   'model': summary, 'constant_velocity': summary_cv, 'per_frame_mm': per_frame,
+                   'paper_style_3d': paper}, f, indent=1)
     columns = {'seq': [s for s, _ in seq_fidx], 'fidx': [int(i) for _, i in seq_fidx], 't_rank': t_rank}
     columns.update(sc['features'])
     columns.update(sc['labels'])

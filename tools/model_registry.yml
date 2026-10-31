@@ -22,3 +22,9 @@ mirror_s1:
   ckpt: results/real_PathUNetPoseSmallCV_cv5_mirror_s1_fme_f2_seq1_raw/models/pathnet_best.pt
   label: "Small+pose+CV+mirror (s1)"
   default: true
+
+obst_s1:
+  run: results/real_PathUNetPoseSmallCVObst_obst
+  ckpt: results/real_PathUNetPoseSmallCVObst_obst/models/pathnet_best.pt
+  label: "v2: no Branch B + obstacle loss (s1)"
+  default: true
