@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader
 
 from models.path_models import get_path_model
 from utils.path_utils import (apply_overrides, apply_test_seq, constant_velocity, format_table, load_cfg, make_dataset,
-                              predict, score, set_seed, summarize, test_set_name, write_per_window_csv)
+                              predict, score, set_seed, summarize, test_set_name, write_per_window_csv, UPTOR_SETS)
 from utils.sequence_order import temporal_rank
 
 
@@ -78,7 +78,7 @@ def main(args):
 
     ds = cfg['dataset_specs']
     test_name = test_set_name(cfg)
-    test_seqs = ds['test'] if cfg['dataset'] != 'DARKO' else sorted(dataset.pose)
+    test_seqs = ds['test'] if cfg['dataset'] not in UPTOR_SETS else sorted(dataset.pose)
     print(f"\n{cfg['model_name']} ({os.path.basename(ckpt)}) on {test_name}: {len(res['keys'])} windows")
     print(format_table(summary, summary_cv, subsets, model_name=cfg['model_name']))
     print(f"ground truth itself in occupied cells: {sc['gt_collision'].mean() * 100:.1f}% of points "
@@ -98,22 +98,32 @@ def main(args):
             print(f"  {s_name:9s} model: " + ' '.join(f'{v:5.0f}' for v in err_m[mask].mean(0)))
             print(f"  {'':9s} CV:    " + ' '.join(f'{v:5.0f}' for v in err_cv[mask].mean(0)))
 
-    # Paper-style root error (UPTor Table II: ADE_Tr / FDE_Tr on the root joint in 3D). Our models predict x, y
+    # Paper-style root error (UPTor Tables I / II: ADE_Tr / FDE_Tr on the root joint in 3D). Our models predict x, y
     # only, so the predicted height is held at the current root height (z = 0 in the actor frame).
     paper = {}
-    if cfg['dataset'] == 'DARKO':
-        print("\npaper-style root error, 3D (predicted height = current height), all windows:")
-        for name, p in (('model', res['pred']), ('cv', cv_pred)):
-            e = np.sqrt(((p - res['gt']) ** 2).sum(-1) + res['gt_z'] ** 2)
-            paper[name] = {'ade_3d': float(e.mean()), 'fde_3d': float(e[:, -1].mean())}
-            print(f"  {name:6s} ADE_Tr {e.mean():.3f} m   FDE_Tr {e[:, -1].mean():.3f} m")
-        print("  (UPTor paper, DARKO: UPTor 0.13 / 0.26 m, STPOTR 0.17 / 0.34 m; different test trials)")
+    if cfg['dataset'] in UPTOR_SETS:
+        e3 = {name: np.sqrt(((p - res['gt']) ** 2).sum(-1) + res['gt_z'] ** 2) for name, p in (('model', res['pred']), ('cv', cv_pred))}
+        groups = {'all': np.ones(len(res['keys']), bool)}
+        if cfg['dataset'] == 'H36M':  # the walking actions vs the mostly static rest
+            walk = np.array([k.split('/')[1].split('@')[0].split(' ')[0] in ('Walking', 'WalkDog', 'WalkTogether')
+                             for k in res['keys']])
+            groups.update({'walking actions': walk, 'other actions': ~walk})
+        print("\npaper-style root error, 3D (predicted height = current height):")
+        for g, mask in groups.items():
+            for name, e in e3.items():
+                paper.setdefault(g, {})[name] = {'ade_3d': float(e[mask].mean()), 'fde_3d': float(e[mask][:, -1].mean()),
+                                                 'n': int(mask.sum())}
+                print(f"  {g:16s} {name:6s} ADE_Tr {e[mask].mean():.3f} m   FDE_Tr {e[mask][:, -1].mean():.3f} m   ({mask.sum()} windows)")
+        print({'DARKO': "  (UPTor paper, Table II: UPTor 0.13 / 0.26 m, STPOTR 0.17 / 0.34 m; different test trials)",
+               'H36M': "  (UPTor paper, Table I: UPTor 0.12 / 0.25 m, STPOTR 0.13 / 0.27 m, DMMGAN 0.12 / 0.23 m and "
+                       "DLow 0.19 / 0.45 m are best-of-many samples; same test subjects S9, S11)",
+               'CMU': "  (UPTor paper, Table II: UPTor 0.07 / 0.14 m, STPOTR 0.09 / 0.18 m; different test trials)"}[cfg['dataset']])
 
     # Per-window time stamps, for paired / block-bootstrap comparisons. Real-IM stores windows shuffled, so the
-    # time order is rebuilt; DARKO windows are keyed by their start frame within the trial already.
+    # time order is rebuilt; DARKO / H36M / CMU windows are keyed by their start frame within the trial already.
     root_idx = ds['root_idx']
     seq_fidx = [k.rsplit('.', 1) for k in res['keys']]
-    if cfg['dataset'] == 'DARKO':
+    if cfg['dataset'] in UPTOR_SETS:
         t_rank = np.array([int(i) for _, i in seq_fidx])
     else:
         ranks = {dataset.idx2scene[sub]: temporal_rank(dataset.pose[sub], root_idx)[0] for sub in dataset.pose}

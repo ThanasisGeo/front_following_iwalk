@@ -38,7 +38,7 @@ from tqdm import tqdm
 
 from models.path_models import get_path_model
 from utils.augment import mirror_batch
-from utils.path_utils import load_cfg, make_dataset, predict, score, seed_worker, set_seed, summarize
+from utils.path_utils import UPTOR_SETS, load_cfg, make_dataset, predict, score, seed_worker, set_seed, summarize
 from utils.sequence_order import temporal_rank
 
 STOP = {'requested': False}
@@ -161,9 +161,9 @@ def main(args):
     ds = cfg['dataset_specs']
     n_total = ds['n_hist'] + ds['n_pred']
 
-    if cfg['dataset'] == 'DARKO':
-        # By-trial split from the cfg (dataset_specs split_seed / n_folds / test_fold / val_frac), see
-        # datasets/dataset_darko.py. The test fold is never loaded here.
+    if cfg['dataset'] in UPTOR_SETS:
+        # Split from the cfg (DARKO / CMU: by-trial folds, split_seed / n_folds / test_fold / val_frac; H36M: by
+        # subject), see datasets/dataset_darko.py, dataset_uptor.py. The test set is never loaded here.
         train_set, val_set = make_dataset('train', cfg), make_dataset('val', cfg)
     else:
         print('train sequences:', ds['train'], '| test (never used here):', ds['test'])

@@ -93,13 +93,19 @@ def seed_worker(worker_id):
     random.seed(s)
 
 
+UPTOR_SETS = ('DARKO', 'H36M', 'CMU')  # the UPTor paper's datasets: split inside the loader, modes incl. 'val'
+
+
 def make_dataset(mode, cfg):
-    # The dataset class for cfg['dataset']. DARKO: mode 'train' | 'val' | 'test' | 'trainval' (by-trial split,
-    # datasets/dataset_darko.py). Real-IM / GTA: 'train' | 'test' (by sequence). Imported lazily: the Real-IM
-    # loader needs open3d, the DARKO one doesn't.
+    # The dataset class for cfg['dataset']. DARKO / H36M / CMU: mode 'train' | 'val' | 'test' | 'trainval' (split
+    # inside the loader: datasets/dataset_darko.py, datasets/dataset_uptor.py). Real-IM / GTA: 'train' | 'test'
+    # (by sequence). Imported lazily: the Real-IM loader needs open3d, the others don't.
     if cfg['dataset'] == 'DARKO':
         from datasets.dataset_darko import DatasetDARKO
         return DatasetDARKO(mode, cfg)
+    if cfg['dataset'] in ('H36M', 'CMU'):
+        from datasets.dataset_uptor import DatasetUPTor
+        return DatasetUPTor(mode, cfg)
     from datasets.dataset_gta import DatasetGTA
     return DatasetGTA(mode, cfg)
 
@@ -109,6 +115,9 @@ def test_set_name(cfg):
     if cfg['dataset'] == 'DARKO':
         from datasets.dataset_darko import split_name
         return split_name(cfg['dataset_specs'])
+    if cfg['dataset'] in ('H36M', 'CMU'):
+        from datasets.dataset_uptor import uptor_split_name
+        return uptor_split_name(cfg['dataset'], cfg['dataset_specs'])
     return '+'.join(cfg['dataset_specs']['test'])
 
 
@@ -213,7 +222,7 @@ def summarize(errors, labels, subsets):
 
 
 def format_table(summary_model, summary_cv, subsets, model_name='model'):
-    mm = lambda x: f'{x * 1000:6.0f}'
+    mm = lambda x: f'{x * 1000:6.0f}' if x is not None else f"{'-':>6s}"  # '-': horizon beyond the prediction
     head = (f"{'subset':16s} {'n':>4s} | {model_name[:6]:>6s}: {'ADE':>6s} {'FDE':>6s} {'@1s':>6s} {'@2s':>6s} "
             f"{'lat':>6s} {'head°':>6s} {'miss%':>6s} {'coll%':>6s} | {'CV':>2s}: {'ADE':>6s} {'FDE':>6s}")
     lines = [head, '-' * len(head)]
@@ -223,8 +232,8 @@ def format_table(summary_model, summary_cv, subsets, model_name='model'):
             lines.append(f'{s:16s} {0:4d} |')
             continue
         coll = f"{m['collision'] * 100:6.1f}" if 'collision' in m else f"{'-':>6s}"
-        lines.append(f"{s:16s} {m['n']:4d} | {'':6s}  {mm(m['ade'])} {mm(m['fde'])} {mm(m['err_1s'])} "
-                     f"{mm(m['err_2s'])} {mm(m['lat_err'])} {m['head_err']:6.1f} {m['miss'] * 100:6.1f} {coll} "
+        lines.append(f"{s:16s} {m['n']:4d} | {'':6s}  {mm(m['ade'])} {mm(m['fde'])} {mm(m.get('err_1s'))} "
+                     f"{mm(m.get('err_2s'))} {mm(m['lat_err'])} {m['head_err']:6.1f} {m['miss'] * 100:6.1f} {coll} "
                      f"|     {mm(c['ade'])} {mm(c['fde'])}")
     lines.append('(distances in mm; lat = sideways part of the endpoint error; CV = constant velocity B0)')
     return '\n'.join(lines)

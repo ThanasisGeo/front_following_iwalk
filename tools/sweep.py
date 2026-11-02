@@ -9,7 +9,8 @@
 #   run folder  results/<cfg>_<name>_<variant>_s<seed>_f<fold>/   (train log in train_stdout.txt)
 #   variants    base (no augmentation, augment.mirror=0) and/or mirror (augment.mirror=0.5)
 #   folds       Real-IM: each sequence becomes the test set once, the other four are used for training/validation.
-#               DARKO: fold k = trial fold k of dataset_specs.n_folds (--set dataset_specs.test_fold=k); every
+#               DARKO / CMU: fold k = trial fold k of dataset_specs.n_folds (--set dataset_specs.test_fold=k); H36M has
+#               one fixed split (S9, S11), so a single fold "0". DARKO: every
 #               trial is a test trial exactly once over the n_folds folds.
 # Finished runs (both evals present) are skipped, unfinished ones resume from trainstate_last.pt, so the same
 # command can be re-run in a new session. After a run completes, its trainstate is deleted (only
@@ -37,7 +38,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.path_utils import load_cfg, test_set_name  # noqa: E402
 
 SUBSETS = ['all', 'straight', 'turn', 'turn_heading', 'turn_new', 'turn_ongoing']
-METRICS = [('ade', 'ADE'), ('fde', 'FDE'), ('err_1s', '@1s'), ('err_2s', '@2s'), ('lat_err', 'sideways@end')]
+METRICS_ALL = [('ade', 'ADE'), ('fde', 'FDE'), ('err_1s', '@1s'), ('err_2s', '@2s'), ('lat_err', 'sideways@end')]
 VARIANTS = {'base': ['augment.mirror=0'], 'mirror': ['augment.mirror=0.5']}
 STOP = {'requested': False}
 
@@ -54,7 +55,9 @@ def run_dir(cfg, exp):
 def fold_args(cfg_name, fold):
     # train/eval arguments that select a fold, and the test-set name eval_path.py uses in its output folder.
     cfg = load_cfg(cfg_name)
-    if cfg['dataset'] == 'DARKO':
+    if cfg['dataset'] == 'H36M':  # one fixed split (S9, S11): a single "fold"
+        return [], [], test_set_name(cfg)
+    if cfg['dataset'] in ('DARKO', 'CMU'):
         over = [f'dataset_specs.test_fold={fold}']
         cfg['dataset_specs']['test_fold'] = int(fold)
         return [], over, test_set_name(cfg)
@@ -123,6 +126,11 @@ def summarize(args, folds):
     lines.append(f'Seeds {args.seeds}, folds {folds}, {args.epochs} epochs, extra overrides {args.set or "none"}. '
                  f'Pooled over folds; mean ± std over seeds; mm.\n')
     cv_done = False
+    # metrics this horizon has (CMU's 1-s horizon has no @2s): the columns of any finished per-window file
+    done = [per_window_path(args.cfg, f'{args.name}_{v}_s{s}_f{f}', c, f)
+            for c in ('last', 'best') for v in args.variants for s in args.seeds for f in folds]
+    done = [p for p in done if os.path.exists(p)]
+    METRICS = [(m, l) for m, l in METRICS_ALL if not done or f'm_{m}' in read_per_window(done[0])]
     for ckpt in ('last', 'best'):
         lines.append(f'\n## Checkpoint: {ckpt}\n')
         header = '| variant | seeds | subset | n | ' + ' | '.join(l for _, l in METRICS) + ' |'
@@ -188,8 +196,10 @@ def main():
     signal.signal(signal.SIGINT, _stop)
     cfg = load_cfg(args.cfg)
     ds = cfg['dataset_specs']
-    if cfg['dataset'] == 'DARKO':
+    if cfg['dataset'] in ('DARKO', 'CMU'):
         seqs, default = [str(k) for k in range(ds.get('n_folds', 7))], [str(ds.get('test_fold', 0))]
+    elif cfg['dataset'] == 'H36M':
+        seqs = default = ['0']
     else:
         seqs = list(ds['train']) + [s for s in ds['test'] if s not in ds['train']]
         default = list(ds['test'])

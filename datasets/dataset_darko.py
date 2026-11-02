@@ -9,7 +9,9 @@
 #   * joints -> our 18 (COCO-17 order + root). Root (joint 17) = DARKO pelvis by default (the joint the paper
 #     scores), or the hip midpoint as in Real-IM (dataset_specs.root_joint: pelvis | hip_mid)
 #   * actor frame as for Real-IM: origin = root at "now" (last past frame, also in height), +x = root motion
-#     over the last heading_frames frames (3 = 0.2 s), z up, yaw only
+#     over the last heading_frames frames (3 = 0.2 s), z up, yaw only. If the root moved less than
+#     dataset_specs.heading_min_move (default 0 = never), +x = the direction the hips face instead
+#     (datasets/dataset_uptor.py uses this for the many standing windows of Human3.6M)
 #   * past-path maps: Gaussian blobs, utils/gta_utils.traj2map on the +-map_extent grid (as stored for Real-IM)
 #   * occupancy map: DARKO has none -> every cell "unknown" (-0.01)
 #
@@ -54,15 +56,7 @@ class DatasetDARKO(Dataset):
 
     def __init__(self, mode, cfg):
         ds = cfg['dataset_specs']
-        self.n_hist, self.n_pred = ds['n_hist'], ds['n_pred']
-        self.n_total = self.n_hist + self.n_pred
-        self.root_idx = ds['root_idx']
-        self.heading_frames = ds.get('heading_frames', 3)
-        self.map_extent, self.map_size = ds['map_extent'], ds['map_size']
-        self.use_traj_map = ds.get('use_traj_map', True)  # false: skip the past-path maps (models without maps)
-        self.root_joint = ds.get('root_joint', 'pelvis')
-        if self.root_joint not in ('pelvis', 'hip_mid'):
-            raise ValueError(f"dataset_specs.root_joint must be 'pelvis' or 'hip_mid', got {self.root_joint!r}")
+        self._setup(ds)
 
         data_dir = os.path.join(os.path.dirname(__file__), ds['data_file'])
         files = sorted(glob.glob(os.path.join(data_dir, '*.npy')))
@@ -84,6 +78,19 @@ class DatasetDARKO(Dataset):
         self.idx2scene = {name: name for name in self.pose}  # same attribute name as DatasetGTA
         print(f'DARKO {mode}: {len(self.pose)} trials, {len(self.data)} windows of {self.n_total} frames')
 
+    def _setup(self, ds):
+        # Window / frame / map settings shared with datasets/dataset_uptor.py.
+        self.n_hist, self.n_pred = ds['n_hist'], ds['n_pred']
+        self.n_total = self.n_hist + self.n_pred
+        self.root_idx = ds['root_idx']
+        self.heading_frames = ds.get('heading_frames', 3)
+        self.heading_min_move = ds.get('heading_min_move', 0.0)  # m; 0 = always the root motion (DARKO, as before)
+        self.map_extent, self.map_size = ds['map_extent'], ds['map_size']
+        self.use_traj_map = ds.get('use_traj_map', True)  # false: skip the past-path maps (models without maps)
+        self.root_joint = ds.get('root_joint', 'pelvis')
+        if self.root_joint not in ('pelvis', 'hip_mid'):
+            raise ValueError(f"dataset_specs.root_joint must be 'pelvis' or 'hip_mid', got {self.root_joint!r}")
+
     def __len__(self):
         return len(self.data)
 
@@ -93,6 +100,9 @@ class DatasetDARKO(Dataset):
         now = self.n_hist - 1
         origin = w[now, self.root_idx].copy()
         d = w[now, self.root_idx, :2] - w[now - self.heading_frames, self.root_idx, :2]
+        if np.linalg.norm(d) < self.heading_min_move:   # standing still: face the way the hips face instead
+            l = w[now, 11, :2] - w[now, 12, :2]           # right hip -> left hip
+            d = np.array([l[1], -l[0]])
         yaw = np.arctan2(d[1], d[0])
         c, s_ = np.cos(yaw), np.sin(yaw)
         R = np.array([[c, s_, 0], [-s_, c, 0], [0, 0, 1]], dtype=np.float32)  # world -> actor
