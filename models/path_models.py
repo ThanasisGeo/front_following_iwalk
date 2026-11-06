@@ -101,11 +101,20 @@ class PathUNet(nn.Module):
         self.output = ms.get('output', 'heatmap')
         if self.output not in ('heatmap', 'cv_residual'):
             raise ValueError(f"unknown model_specs.output: {self.output!r} (heatmap | cv_residual)")
+        # model_specs.prior (cv_residual only): 'cv' = straight line at the current velocity (default);
+        # 'unicycle' = the head also outputs a turn rate and an acceleration, and the prior becomes the
+        # non-holonomic rollout heading(t) = heading_cv + w t, speed(t) = speed_cv + a t. Both start at 0
+        # (zero-initialised layer), so training starts exactly at constant velocity.
+        self.prior = ms.get('prior', 'cv')
+        if self.prior not in ('cv', 'unicycle'):
+            raise ValueError(f"unknown model_specs.prior: {self.prior!r} (cv | unicycle)")
+        self.n_prior_params = 2 if self.prior == 'unicycle' else 0
         if self.output == 'cv_residual':
             self.cv_vel_frames = ms.get('cv_vel_frames', 4)
             w = ms.get('cv_head_width', 256)
             head = nn.Sequential(nn.Linear(self.pathnet.fc1.in_features, w), nn.ReLU(),
-                                 nn.Dropout(ms.get('mlp_dropout', 0.0)), nn.Linear(w, self.n_pred * 2))
+                                 nn.Dropout(ms.get('mlp_dropout', 0.0)),
+                                 nn.Linear(w, self.n_pred * 2 + self.n_prior_params))
             nn.init.zeros_(head[-1].weight)
             nn.init.zeros_(head[-1].bias)
             self.pathnet.cv_head = head
@@ -133,7 +142,7 @@ class PathUNet(nn.Module):
                 n_in += container.pose_encoder.out_dim
             w = ms.get('cv_head_width', 256)
             head = nn.Sequential(nn.Linear(n_in, w), nn.ReLU(), nn.Dropout(ms.get('mlp_dropout', 0.0)),
-                                 nn.Linear(w, self.n_pred * 2))
+                                 nn.Linear(w, self.n_pred * 2 + self.n_prior_params))
             nn.init.zeros_(head[-1].weight)
             nn.init.zeros_(head[-1].bias)
             container.cv_head = head
@@ -178,8 +187,18 @@ class PathUNet(nn.Module):
             k = self.cv_vel_frames
             vel = (traj_hist[:, -1] - traj_hist[:, -1 - k]) / k
             steps = torch.arange(1, self.n_pred + 1, device=pose.device, dtype=pose.dtype)
-            traj_cv = traj_hist[:, -1:] + vel[:, None, :] * steps[None, :, None]
-            correction = self.pathnet.cv_head(torch.cat((bottleneck.reshape(bs, -1), extra), dim=1))
+            head_out = self.pathnet.cv_head(torch.cat((bottleneck.reshape(bs, -1), extra), dim=1))
+            correction = head_out[:, :self.n_pred * 2]
+            if self.prior == 'unicycle':
+                # learned turn rate (rad/frame, |w| < 0.2) and acceleration (m/frame^2, |a| < 0.005), bounded
+                turn = 0.2 * torch.tanh(head_out[:, -2:-1])
+                acc = 0.005 * torch.tanh(head_out[:, -1:])
+                speed = (vel.norm(dim=1, keepdim=True) + acc * steps[None]).clamp(min=0)   # (B, n_pred)
+                heading = torch.atan2(vel[:, 1:], vel[:, :1]) + turn * steps[None]
+                step_xy = torch.stack((torch.cos(heading), torch.sin(heading)), dim=-1) * speed[..., None]
+                traj_cv = traj_hist[:, -1:] + step_xy.cumsum(dim=1)
+            else:
+                traj_cv = traj_hist[:, -1:] + vel[:, None, :] * steps[None, :, None]
             out = {'traj': traj_cv + correction.reshape(bs, self.n_pred, 2)}
             if self.aux_decoder:
                 out['traj_map'] = traj_map_pred
