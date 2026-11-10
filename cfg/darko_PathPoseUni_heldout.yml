@@ -1,0 +1,72 @@
+# DARKO, HELD-OUT PERSON test: the unicycle model (darko_PathPoseCV + model_specs.prior: unicycle, as sweep uni7)
+# trained without ever seeing the test person. DARKO has no person IDs, so the person was inferred from body
+# measurements (MeTRAbs skeletons): the 59 trials of the clearly shortest body type (median height 1.53 m, others
+# ~1.60 m; proportion clusters C, D, E). 30 further trials of similar height (< 1.555 m, other clusters) might be the
+# same person seen from another side, so they are used nowhere. Test 10.7% of the frames (the paper: ~14%).
+# Compare with the same trials in the random-split sweep uni7, where the model had seen this person.
+dataset: DARKO
+model_name: PathUNetPose
+model_specs:
+  n_feats_unet: 16          # (the UNet is built, then dropped: map_input none)
+  n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
+  mlp_width: 512            # only keeps the (then deleted) bottleneck MLP small while the model is built
+  mlp_dropout: 0.2          # dropout inside the correction head
+  output: cv_residual       # path = constant velocity + learned correction
+  prior: unicycle           # learned turn rate + acceleration (non-holonomic rollout), as sweep uni7
+  aux_decoder: false        # no Branch B
+  map_input: none           # no UNet, no maps
+  cv_vel_frames: 12         # velocity from the last 12 past frames (0.8 s at 15 Hz)
+  cv_head_width: 256        # hidden width of the correction head (output: 30 frames x 2)
+  pose_input: learned       # learned pose-history encoder
+  n_feats_pose_path: 128
+
+dataset_specs:
+  data_file: ../data/DARKO/  # the trial .npy files (UPtor/darko/data), relative to datasets/
+  hz: 15                    # frames per second (67 ms steps)
+  n_hist: 15                # 1.0 s
+  n_pred: 30                # 2.0 s
+  n_joints: 18              # COCO-17 order + root
+  root_idx: 17
+  root_joint: pelvis        # pelvis (the joint the paper scores) | hip_mid (as Real-IM)
+  left_hip_idx: 11
+  right_hip_idx: 12
+  heading_frames: 3         # actor frame +x = root motion over the last 3 frames (0.2 s), as for Real-IM
+  max_dist_from_human: 4    # read by the model code; the maps themselves cover map_extent
+  map_extent: 2.5           # past-path maps cover +-2.5 m (0.125 m cells), as for Real-IM
+  map_size: 40              # hard-coded 5x5 bottleneck in the UNet: must stay 40
+  use_map: true             # the loader still returns the (all-unknown) occupancy map; the model ignores it
+  use_traj_map: false       # no past-path maps (the model doesn't use them)
+  # held-out person (see the header). The remaining 419 trials: val_frac validation, the rest training.
+  split_label: darko_heldout_short
+  split_seed: 0
+  test_trials: [19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 171, 172, 173, 174, 175, 176, 177, 184, 185, 186, 187, 191, 192, 195, 196, 198, 200, 201, 202, 203, 204, 205, 206, 208]
+  exclude_trials: [94, 161, 213, 219, 225, 227, 229, 230, 231, 259, 263, 266, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 424, 433, 434, 435, 439, 479, 483, 489]
+  val_frac: 0.1
+
+loss:
+  distance: euclidean       # mean distance (what ADE/FDE measure) instead of squared error
+  use_traj: true
+  use_final_pos: true
+  use_traj_map: false
+  use_collision: false
+  use_obstacle: false       # no obstacles in DARKO
+  weight_traj: 1
+  weight_final_pos: 1
+
+turns:                      # Real-IM thresholds (3-s horizon) scaled by 2/3 for the 2-s horizon
+  dt: 0.0667                # s per frame (15 Hz)
+  vel_frames: 12            # 0.8 s, same as constant velocity
+  turn_lat: 0.5
+  turn_heading: 30.0
+  straight_lat_max: 0.33
+  hist_curv_new: 15.0
+  onset_lat: 0.17
+  lat_bins: [0.0, 0.17, 0.5, 1.0]
+
+lr: 0.0001
+lr_step_size: 60            # LR x0.1 at epochs 60 and 120 (train 150 epochs)
+lr_gamma: 0.1
+weight_decay: 0.0001        # AdamW
+augment:
+  mirror: 0.5               # left/right mirror augmentation
+save_freq: 25

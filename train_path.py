@@ -40,6 +40,7 @@ from models.path_models import get_path_model
 from utils.augment import mirror_batch
 from utils.path_utils import UPTOR_SETS, load_cfg, make_dataset, predict, score, seed_worker, set_seed, summarize
 from utils.sequence_order import temporal_rank
+from utils.turns import get_thresholds, turn_features, turn_labels
 
 STOP = {'requested': False}
 
@@ -49,20 +50,35 @@ def _request_stop(signum, frame):
     STOP['requested'] = True
 
 
-def path_loss(out, label, cfg):
+def turn_weights(hist, gt, cfg):
+    # Per-window loss weights against the turn imbalance (loss.turn_weight, 1 = off): windows labelled 'turn' or
+    # 'turn_heading' (utils/turns.py, same thresholds as the evaluation) get turn_weight, the rest 1, normalised to
+    # mean 1 per batch so the loss scale stays the same. The labels use the TRUE future: fine for a training
+    # weight, the model never sees them.
+    th = get_thresholds(cfg)
+    lab = turn_labels(turn_features(hist.detach().cpu().numpy(), gt.detach().cpu().numpy(), th), th)
+    w = torch.ones(len(gt), device=gt.device)
+    w[torch.from_numpy(lab['turn'] | lab['turn_heading']).to(gt.device)] = cfg['loss']['turn_weight']
+    return w / w.mean()
+
+
+def path_loss(out, label, cfg, hist=None):
     # Path-only version of train.py's loss_func. Terms are switched on by the cfg `loss:` block, and the
-    # heat-map terms only apply when the model returns 'traj_map'.
+    # heat-map terms only apply when the model returns 'traj_map'. hist: past root path (B, n_hist, 2), needed
+    # only for loss.turn_weight.
     loss_cfg, root_idx = cfg['loss'], cfg['dataset_specs']['root_idx']
     traj = out['traj']
     dev = traj.device
     gt = label['pose']['pose'][:, :, root_idx, :2].to(dev).float()
     terms = {}
+    w = turn_weights(hist, gt, cfg) if loss_cfg.get('turn_weight', 1) != 1 and hist is not None else None
     # loss.distance: 'mse' (default, squared error as in train.py) or 'euclidean' (mean distance in metres, the
-    # quantity ADE/FDE measure; as in the UPTor paper's L2-norm loss).
+    # quantity ADE/FDE measure; as in the UPTor paper's L2-norm loss). Per window first, so it can be weighted.
     if loss_cfg.get('distance', 'mse') == 'euclidean':
-        dist = lambda a, b: ((a - b).pow(2).sum(-1) + 1e-9).sqrt().mean()
+        per = lambda a, b: ((a - b).pow(2).sum(-1) + 1e-9).sqrt().reshape(len(a), -1).mean(1)
     else:
-        dist = F.mse_loss
+        per = lambda a, b: (a - b).pow(2).reshape(len(a), -1).mean(1)
+    dist = (lambda a, b: per(a, b).mean()) if w is None else (lambda a, b: (per(a, b) * w).mean())
     if loss_cfg.get('use_traj', True):
         terms['traj'] = dist(traj, gt) * loss_cfg.get('weight_traj', 1.0)
     if loss_cfg.get('use_final_pos', True):
@@ -225,7 +241,8 @@ def main(args):
             if mirror_p:  # left/right mirror augmentation (training batches only), see utils/augment.py
                 poses_inp, poses_label = mirror_batch(poses_inp, poses_label, mirror_p, cfg['dataset_specs']['n_joints'])
             optimizer.zero_grad()
-            loss, terms = path_loss(model(poses_inp), poses_label, cfg)
+            hist = poses_inp['pose']['pose'][:, :, cfg['dataset_specs']['root_idx'], :2].to(device).float()
+            loss, terms = path_loss(model(poses_inp), poses_label, cfg, hist)
             loss.backward()
             optimizer.step()
             losses.append(loss.item())

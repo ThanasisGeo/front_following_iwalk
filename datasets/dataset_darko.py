@@ -38,6 +38,15 @@ UNKNOWN = -0.01
 
 def darko_split(trials, ds):
     # Deterministic split of the trial names: {'train': [...], 'val': [...], 'test': [...]}.
+    # dataset_specs.test_trials (optional): a fixed test set (e.g. one held-out person) instead of the folds;
+    # dataset_specs.exclude_trials: trials used nowhere (e.g. possibly the same person). The remaining trials are
+    # shuffled with split_seed and val_frac of them become validation.
+    if ds.get('test_trials'):
+        test, drop = {f'{int(t):05d}' for t in ds['test_trials']}, {f'{int(t):05d}' for t in ds.get('exclude_trials', [])}
+        rest = [t for t in trials if t not in test and t not in drop]
+        rest = [rest[i] for i in np.random.default_rng(ds.get('split_seed', 0)).permutation(len(rest))]
+        n_val = int(round(ds.get('val_frac', 0.1) * len(rest)))
+        return {'train': sorted(rest[n_val:]), 'val': sorted(rest[:n_val]), 'test': sorted(t for t in trials if t in test)}
     rng = np.random.default_rng(ds.get('split_seed', 0))
     order = [trials[i] for i in rng.permutation(len(trials))]
     folds = np.array_split(np.arange(len(order)), ds.get('n_folds', 7))
@@ -49,6 +58,8 @@ def darko_split(trials, ds):
 
 
 def split_name(ds):
+    if ds.get('test_trials'):
+        return ds.get('split_label', 'darko_heldout')
     return f"darko_fold{ds.get('test_fold', 0)}of{ds.get('n_folds', 7)}_s{ds.get('split_seed', 0)}"
 
 

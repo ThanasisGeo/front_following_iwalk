@@ -1,0 +1,18 @@
+{
+ "cfg": "darko_PathPoseUni_heldout",
+ "exp": "heldout",
+ "seed": 0,
+ "epochs": 100,
+ "batch_size": 32,
+ "lr": 0.0,
+ "test_seq": null,
+ "set": [],
+ "init_released": null,
+ "resume": null,
+ "val_frac": 0.2,
+ "val_freq": 1,
+ "select": "val_ade",
+ "save_freq": 0,
+ "num_workers": 2,
+ "max_train_batches": 0
+}

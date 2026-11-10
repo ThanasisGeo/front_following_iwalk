@@ -1,0 +1,21 @@
+{
+ "cfg": "darko_PathPoseUni_heldout",
+ "exp": "seen_control",
+ "seed": 0,
+ "epochs": 100,
+ "batch_size": 32,
+ "lr": 0.0,
+ "test_seq": null,
+ "set": [
+  "dataset_specs.test_trials=[20,22,24,26,28,30,32,34,111,113,115,117,119,121,123,125,127,171,173,175,177,185,187,192,196,200,202,204,206]",
+  "dataset_specs.split_label=darko_halfshort"
+ ],
+ "init_released": null,
+ "resume": null,
+ "val_frac": 0.2,
+ "val_freq": 1,
+ "select": "val_ade",
+ "save_freq": 0,
+ "num_workers": 2,
+ "max_train_batches": 0
+}

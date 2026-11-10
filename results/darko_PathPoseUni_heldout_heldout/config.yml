@@ -1,0 +1,154 @@
+dataset: DARKO
+model_name: PathUNetPose
+model_specs:
+  n_feats_unet: 16
+  n_feats_unet_mlp: 1024
+  mlp_width: 512
+  mlp_dropout: 0.2
+  output: cv_residual
+  prior: unicycle
+  aux_decoder: false
+  map_input: none
+  cv_vel_frames: 12
+  cv_head_width: 256
+  pose_input: learned
+  n_feats_pose_path: 128
+dataset_specs:
+  data_file: ../data/DARKO/
+  hz: 15
+  n_hist: 15
+  n_pred: 30
+  n_joints: 18
+  root_idx: 17
+  root_joint: pelvis
+  left_hip_idx: 11
+  right_hip_idx: 12
+  heading_frames: 3
+  max_dist_from_human: 4
+  map_extent: 2.5
+  map_size: 40
+  use_map: true
+  use_traj_map: false
+  split_label: darko_heldout_short
+  split_seed: 0
+  test_trials:
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 26
+  - 27
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+  - 35
+  - 111
+  - 112
+  - 113
+  - 114
+  - 115
+  - 116
+  - 117
+  - 118
+  - 119
+  - 120
+  - 121
+  - 122
+  - 123
+  - 124
+  - 125
+  - 126
+  - 127
+  - 128
+  - 171
+  - 172
+  - 173
+  - 174
+  - 175
+  - 176
+  - 177
+  - 184
+  - 185
+  - 186
+  - 187
+  - 191
+  - 192
+  - 195
+  - 196
+  - 198
+  - 200
+  - 201
+  - 202
+  - 203
+  - 204
+  - 205
+  - 206
+  - 208
+  exclude_trials:
+  - 94
+  - 161
+  - 213
+  - 219
+  - 225
+  - 227
+  - 229
+  - 230
+  - 231
+  - 259
+  - 263
+  - 266
+  - 294
+  - 295
+  - 296
+  - 297
+  - 298
+  - 299
+  - 300
+  - 301
+  - 302
+  - 303
+  - 424
+  - 433
+  - 434
+  - 435
+  - 439
+  - 479
+  - 483
+  - 489
+  val_frac: 0.1
+loss:
+  distance: euclidean
+  use_traj: true
+  use_final_pos: true
+  use_traj_map: false
+  use_collision: false
+  use_obstacle: false
+  weight_traj: 1
+  weight_final_pos: 1
+turns:
+  dt: 0.0667
+  vel_frames: 12
+  turn_lat: 0.5
+  turn_heading: 30.0
+  straight_lat_max: 0.33
+  hist_curv_new: 15.0
+  onset_lat: 0.17
+  lat_bins:
+  - 0.0
+  - 0.17
+  - 0.5
+  - 1.0
+lr: 0.0001
+lr_step_size: 60
+lr_gamma: 0.1
+weight_decay: 0.0001
+augment:
+  mirror: 0.5
+save_freq: 25
