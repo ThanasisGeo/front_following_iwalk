@@ -28,3 +28,9 @@ obst_s1:
   ckpt: results/real_PathUNetPoseSmallCVObst_obst/models/pathnet_best.pt
   label: "v2: no Branch B + obstacle loss (s1)"
   default: true
+
+tw5_s1:
+  run: results/real_PathUNetPoseSmallCVObst_tw5
+  ckpt: results/real_PathUNetPoseSmallCVObst_tw5/models/pathnet_best.pt
+  label: "v2 + turns weighted 5x (s1)"
+  default: true
