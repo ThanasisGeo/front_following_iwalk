@@ -1,0 +1,76 @@
+# PRETRAINING on CMU-Mocap for DARKO. The model and the window protocol are DARKO's (darko_PathPoseUni_heldout.yml:
+# 15 Hz, 1 s -> 2 s, unicycle prior, same CV window), so the weights load directly into the DARKO model
+# (train_path.py --init). Added for pretraining and fine-tuning alike: joint_noise 0.01 m on the input skeletons
+# (CMU is clean motion capture, DARKO's skeletons come from a pose estimator; on DARKO alone it also helped).
+# The pose encoder reads joint POSITIONS: CMU's bone proportions are close to DARKO's, and bone directions
+# (pose_repr: bone_dirs) did worse on DARKO, above all together with joint noise (DARKO's short hip bones).
+# CMU's fold 0 is left out (that split's test trials); the rest is training + validation.
+#
+#   pretrain:  python train_path.py --cfg cmu_PathPoseUni_pretrain --exp pt --epochs 30
+#   fine-tune: python train_path.py --cfg darko_PathPoseUni_heldout --exp pt_ft --epochs 100 \
+#                  --init results/cmu_PathPoseUni_pretrain_pt/models/pathnet_best.pt --set augment.joint_noise=0.01
+#   baseline (same settings, no pretraining): the fine-tune command without --init (--exp abl_noise)
+dataset: CMU
+model_name: PathUNetPose
+model_specs:
+  n_feats_unet: 16          # (the UNet is built, then dropped: map_input none)
+  n_feats_unet_mlp: 1024    # read by UNet.__init__ but unused (kept so the released UNet code runs)
+  mlp_width: 512            # only keeps the (then deleted) bottleneck MLP small while the model is built
+  mlp_dropout: 0.2          # dropout inside the correction head
+  output: cv_residual       # path = prior + learned correction
+  prior: unicycle           # learned turn rate + acceleration, as the DARKO model
+  aux_decoder: false        # no Branch B
+  map_input: none           # no UNet, no maps
+  cv_vel_frames: 12         # velocity from the last 12 past frames (0.8 s at 15 Hz), as DARKO
+  cv_head_width: 256        # hidden width of the correction head (output: 30 frames x 2)
+  pose_input: learned       # learned pose-history encoder
+  n_feats_pose_path: 128
+
+dataset_specs:
+  data_file: ../data/CMU/   # the trial .npy files (UPTor/cmu_mocap/data), relative to datasets/
+  hz: 15                    # 30 Hz -> 15 Hz (every 2nd frame; both offsets for training), DARKO's rate
+  n_hist: 15                # 1.0 s
+  n_pred: 30                # 2.0 s
+  n_joints: 18              # COCO-17 order + root
+  root_idx: 17
+  left_hip_idx: 11
+  right_hip_idx: 12
+  heading_frames: 3         # actor frame as DARKO: +x = root motion over the last 3 frames (0.2 s)
+  max_dist_from_human: 4    # read by the model code; there are no maps
+  map_extent: 2.5
+  map_size: 40              # hard-coded 5x5 bottleneck in the UNet (built, then dropped): must stay 40
+  use_map: true             # the loader still returns the (all-unknown) occupancy map; the model ignores it
+  use_traj_map: false       # no past-path maps
+  split_seed: 0
+  n_folds: 14
+  test_fold: 0              # not used for pretraining
+  val_frac: 0.1
+
+loss:
+  distance: euclidean       # mean distance (what ADE/FDE measure)
+  use_traj: true
+  use_final_pos: true
+  use_traj_map: false
+  use_collision: false
+  use_obstacle: false
+  weight_traj: 1
+  weight_final_pos: 1
+
+turns:                      # DARKO's thresholds (2-s horizon at 15 Hz), only for the validation printout
+  dt: 0.0667
+  vel_frames: 12
+  turn_lat: 0.5
+  turn_heading: 30.0
+  straight_lat_max: 0.33
+  hist_curv_new: 15.0
+  onset_lat: 0.17
+  lat_bins: [0.0, 0.17, 0.5, 1.0]
+
+lr: 0.0001
+lr_step_size: 20            # LR x0.1 at epoch 20 (train 30 epochs; CMU has ~15x DARKO's windows per epoch)
+lr_gamma: 0.1
+weight_decay: 0.0001        # AdamW, as the DARKO runs
+augment:
+  mirror: 0.5               # left/right mirror augmentation
+  joint_noise: 0.01         # metres, input skeletons only
+save_freq: 10

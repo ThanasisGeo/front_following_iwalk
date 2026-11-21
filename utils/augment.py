@@ -14,6 +14,10 @@
 #         y = 0 is row 20, so row r <-> 40 - r, i.e. flip and shift by one row (row 0 has no partner: zero).
 # Enabled with cfg `augment: {mirror: p}` (or --set augment.mirror=0.5): each training window is mirrored with
 # probability p. Validation and test data are never augmented.
+#
+# Joint noise: cfg `augment: {joint_noise: std}` adds Gaussian noise (std in metres, every coordinate) to the INPUT
+# skeletons of each training batch. Motion-capture data (CMU, H3.6M) is perfectly clean while pose-estimator data
+# (DARKO, Real-IM) jitters by a few % per bone; 0.01 m gives about DARKO's level. The targets stay clean.
 # =====================================================================================================
 import torch
 
@@ -63,3 +67,10 @@ def mirror_batch(poses_inp, poses_label, p, n_joints=18, pairs=COCO_LR_PAIRS):
     for k, t in maps.items():
         _flip_rows(t, flip, centred=k in centred)
     return poses_inp, poses_label
+
+
+def add_joint_noise(poses_inp, std):
+    """Add Gaussian noise (std metres) to the input skeletons of a batch (returns the same dict)."""
+    pose = poses_inp['pose']['pose']
+    poses_inp['pose']['pose'] = pose + std * torch.randn_like(pose)  # new tensor: the labels are never touched
+    return poses_inp

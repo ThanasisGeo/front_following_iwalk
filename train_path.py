@@ -19,6 +19,8 @@
 #
 #   python train_path.py --cfg real_PathUNetPose --exp m1_s0 --seed 0 --epochs 600 \
 #          --init_released results/real_Path_GRU_exp/models/pathnet_3600.pt --lr 1e-5
+#   --init <pathnet_N.pt>: start from the weights of an earlier run with the SAME architecture (fine-tuning after
+#          pretraining on another dataset, e.g. cfg/cmu_PathPoseUni_pretrain.yml); optimizer and LR start fresh
 # =====================================================================================================
 import argparse
 import csv
@@ -37,7 +39,7 @@ from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 
 from models.path_models import get_path_model
-from utils.augment import mirror_batch
+from utils.augment import add_joint_noise, mirror_batch
 from utils.path_utils import UPTOR_SETS, load_cfg, make_dataset, predict, score, seed_worker, set_seed, summarize
 from utils.sequence_order import temporal_rank
 from utils.turns import get_thresholds, turn_features, turn_labels
@@ -197,6 +199,9 @@ def main(args):
     if state is None and args.init_released:
         model.init_from_released(args.init_released)
         print(f'initialised from released weights: {args.init_released}')
+    if state is None and args.init:
+        model.load_ckpt(args.init, device)
+        print(f'initialised from {args.init}')
     n_params = sum(p.numel() for p in model.parameters())
     print(f"{cfg['model_name']} (pose_input={model.pose_input}): {n_params / 1e6:.2f} M parameters, device {device}")
 
@@ -223,6 +228,9 @@ def main(args):
     mirror_p = float((cfg.get('augment') or {}).get('mirror', 0.0))
     if mirror_p:
         print(f'augmentation: left/right mirror with probability {mirror_p}')
+    joint_noise = float((cfg.get('augment') or {}).get('joint_noise', 0.0))
+    if joint_noise:
+        print(f'augmentation: joint noise, std {joint_noise} m')
     log_path = os.path.join(run_dir, 'train_metrics.csv')
     log_fields = ['epoch', 'lr', 'train_loss', 'loss_terms', 'val_ade', 'val_fde', 'val_turn_n', 'val_turn_ade',
                   'val_turn_fde', 'val_cv_fde', 'seconds']
@@ -240,6 +248,8 @@ def main(args):
                 break
             if mirror_p:  # left/right mirror augmentation (training batches only), see utils/augment.py
                 poses_inp, poses_label = mirror_batch(poses_inp, poses_label, mirror_p, cfg['dataset_specs']['n_joints'])
+            if joint_noise:  # jitter of the input skeletons (training batches only), see utils/augment.py
+                poses_inp = add_joint_noise(poses_inp, joint_noise)
             optimizer.zero_grad()
             hist = poses_inp['pose']['pose'][:, :, cfg['dataset_specs']['root_idx'], :2].to(device).float()
             loss, terms = path_loss(model(poses_inp), poses_label, cfg, hist)
@@ -302,6 +312,7 @@ if __name__ == '__main__':
     parser.add_argument('--test_seq', default=None, help='fold: use this sequence as the test set, train on the rest')
     parser.add_argument('--set', nargs='*', default=[], help='cfg overrides, e.g. model_specs.n_feats_pose_path=64')
     parser.add_argument('--init_released', default=None, help='warm start from a released pathnet_N.pt')
+    parser.add_argument('--init', default=None, help='start from these weights (pathnet_N.pt, same architecture)')
     parser.add_argument('--resume', default=None, help='path to trainstate_last.pt')
     parser.add_argument('--val_frac', type=float, default=0.2)
     parser.add_argument('--val_freq', type=int, default=1)

@@ -40,10 +40,15 @@ def darko_split(trials, ds):
     # Deterministic split of the trial names: {'train': [...], 'val': [...], 'test': [...]}.
     # dataset_specs.test_trials (optional): a fixed test set (e.g. one held-out person) instead of the folds;
     # dataset_specs.exclude_trials: trials used nowhere (e.g. possibly the same person). The remaining trials are
-    # shuffled with split_seed and val_frac of them become validation.
+    # shuffled with split_seed and val_frac of them become validation, or (val_split: person) the trials
+    # val_person_trials (a second inferred person) are the validation set and all others are training.
     if ds.get('test_trials'):
         test, drop = {f'{int(t):05d}' for t in ds['test_trials']}, {f'{int(t):05d}' for t in ds.get('exclude_trials', [])}
         rest = [t for t in trials if t not in test and t not in drop]
+        if ds.get('val_split', 'random') == 'person':  # validation = another inferred person (val_person_trials)
+            val = {f'{int(t):05d}' for t in ds['val_person_trials']}
+            return {'train': sorted(t for t in rest if t not in val), 'val': sorted(t for t in rest if t in val),
+                    'test': sorted(t for t in trials if t in test)}
         rest = [rest[i] for i in np.random.default_rng(ds.get('split_seed', 0)).permutation(len(rest))]
         n_val = int(round(ds.get('val_frac', 0.1) * len(rest)))
         return {'train': sorted(rest[n_val:]), 'val': sorted(rest[:n_val]), 'test': sorted(t for t in trials if t in test)}
