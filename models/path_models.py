@@ -30,6 +30,9 @@
 #   model_specs.map_input (default 'unet'): 'none' (cv_residual, aux_decoder: false only) = no UNet and no maps at
 #                 all, for datasets without occupancy maps (DARKO). The correction head reads only [past root xy,
 #                 pose feature]; the past-path maps would only repeat the root xy.
+#   model_specs.pose_repr (default 'positions'): what the pose encoder reads. 'bone_dirs' = only the direction of
+#                 each bone of a reduced common skeleton (BONES), no bone lengths and no eyes / ears, so datasets
+#                 that place their joints differently can be mixed. Changes only the encoder's input layer.
 # =====================================================================================================
 import torch
 from torch import nn
@@ -37,20 +40,44 @@ from torch import nn
 from models.pathnet import UNet
 from utils.gta_utils import map2traj, get_relative_pose
 
+# Bones of a reduced skeleton shared by all datasets (COCO-17 joint indices; 'H' = hip midpoint, 'S' = shoulder
+# midpoint). Eyes and ears are left out: Human3.6M and CMU have none (they are copies of the head joint there).
+BONES = [('H', 11), ('H', 12), (11, 13), (13, 15), (12, 14), (14, 16),   # hips, legs
+         ('H', 'S'), ('S', 0),                                            # spine, neck -> nose / head
+         ('S', 5), ('S', 6), (5, 7), (7, 9), (6, 8), (8, 10)]            # shoulders, arms
+
+
+def bone_directions(pose):
+    # (..., J, 3) joints -> (..., len(BONES), 3) unit vectors from parent to child joint. Bone LENGTHS are removed,
+    # so skeletons whose joints are placed differently (e.g. H3.6M's hips are twice as far apart as DARKO's) look
+    # the same when they move the same way.
+    points = {'H': (pose[..., 11, :] + pose[..., 12, :]) / 2, 'S': (pose[..., 5, :] + pose[..., 6, :]) / 2}
+    joint = lambda k: points[k] if isinstance(k, str) else pose[..., k, :]
+    vec = torch.stack([joint(child) - joint(parent) for parent, child in BONES], dim=-2)
+    return vec / vec.norm(dim=-1, keepdim=True).clamp(min=1e-6)
+
+
 class PoseHistEncoder(nn.Module):
-    # Past skeletons (B, n_hist, J, 3) -> one feature vector (B, d).
-    # The skeletons are made root-relative, so this describes the BODY (orientation, lean, gait). Where the
-    # person is comes from the root path, which the UNet already receives.
-    def __init__(self, n_joints, root_idx, d):
+    # Past skeletons (B, n_hist, J, 3) -> one feature vector (B, d). It describes the BODY (orientation, lean, gait);
+    # where the person is comes from the root path, which the model receives separately.
+    #   repr 'positions' (default): all joints relative to the root joint
+    #   repr 'bone_dirs': the direction of each bone in BONES (no lengths), for mixing datasets
+    def __init__(self, n_joints, root_idx, d, repr='positions'):
         super().__init__()
-        self.n_joints, self.root_idx, self.out_dim = n_joints, root_idx, d
-        self.frame_mlp = nn.Sequential(nn.Linear(n_joints * 3, d), nn.ReLU(), nn.Linear(d, d), nn.ReLU())
+        if repr not in ('positions', 'bone_dirs'):
+            raise ValueError(f"unknown model_specs.pose_repr: {repr!r} (positions | bone_dirs)")
+        self.n_joints, self.root_idx, self.out_dim, self.repr = n_joints, root_idx, d, repr
+        n_in = len(BONES) * 3 if repr == 'bone_dirs' else n_joints * 3
+        self.frame_mlp = nn.Sequential(nn.Linear(n_in, d), nn.ReLU(), nn.Linear(d, d), nn.ReLU())
         self.gru = nn.GRU(d, d, batch_first=True)
 
     def forward(self, pose):
         bs, nf = pose.shape[:2]
-        rel = get_relative_pose(pose, self.root_idx, self.n_joints).reshape(bs, nf, -1)
-        return self.gru(self.frame_mlp(rel))[1][0]  # final hidden state
+        if self.repr == 'bone_dirs':
+            x = bone_directions(pose)
+        else:
+            x = get_relative_pose(pose, self.root_idx, self.n_joints)
+        return self.gru(self.frame_mlp(x.reshape(bs, nf, -1)))[1][0]  # final hidden state
 
 
 class UNetPose(UNet):
@@ -159,7 +186,8 @@ class PathUNet(nn.Module):
     def _make_pose_encoder(self, cfg):
         ms = cfg['model_specs']
         if self.pose_input == 'learned':
-            return PoseHistEncoder(self.n_joints, self.root_idx, ms.get('n_feats_pose_path', 128))
+            return PoseHistEncoder(self.n_joints, self.root_idx, ms.get('n_feats_pose_path', 128),
+                                   ms.get('pose_repr', 'positions'))
         raise ValueError(f"unknown model_specs.pose_input: {self.pose_input!r} (none | learned)")
 
     def forward(self, poses_inp):

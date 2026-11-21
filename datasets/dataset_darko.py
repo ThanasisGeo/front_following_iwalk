@@ -50,11 +50,14 @@ def darko_split(trials, ds):
     rng = np.random.default_rng(ds.get('split_seed', 0))
     order = [trials[i] for i in rng.permutation(len(trials))]
     folds = np.array_split(np.arange(len(order)), ds.get('n_folds', 7))
-    test_idx = set(folds[ds.get('test_fold', 0)].tolist())
-    test = [t for i, t in enumerate(order) if i in test_idx]
-    rest = [t for i, t in enumerate(order) if i not in test_idx]
-    n_val = int(round(ds.get('val_frac', 0.1) * len(rest)))
-    return {'train': sorted(rest[n_val:]), 'val': sorted(rest[:n_val]), 'test': sorted(test)}
+    test_fold = folds[ds.get('test_fold', 0)]
+    test = [order[i] for i in test_fold]
+    # Validation = the n_val trials right AFTER the test fold in the shuffled order (wrapping around), so every fold
+    # has its own validation set (taking the first remaining trials gave folds 1..n-1 the same one). Fold 0 unchanged.
+    n_val = int(round(ds.get('val_frac', 0.1) * (len(order) - len(test_fold))))
+    val = [order[(test_fold[-1] + 1 + j) % len(order)] for j in range(n_val)]
+    train = [t for t in order if t not in set(test) | set(val)]
+    return {'train': sorted(train), 'val': sorted(val), 'test': sorted(test)}
 
 
 def split_name(ds):
