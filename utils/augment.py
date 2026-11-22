@@ -23,6 +23,7 @@ import torch
 
 # COCO-17 + hip centre (Real-IM): (left, right) joint pairs. Nose (0) and hip centre (17) map to themselves.
 COCO_LR_PAIRS = [(1, 2), (3, 4), (5, 6), (7, 8), (9, 10), (11, 12), (13, 14), (15, 16)]
+TOE_LR_PAIR = (18, 19)  # DARKO with dataset_specs.toes (n_joints 20)
 
 
 def _mirror_joints(pose, flip, perm):
@@ -48,6 +49,8 @@ def mirror_batch(poses_inp, poses_label, p, n_joints=18, pairs=COCO_LR_PAIRS):
     if not flip.any():
         return poses_inp, poses_label
     perm = list(range(n_joints))
+    if n_joints == 20:
+        pairs = pairs + [TOE_LR_PAIR]
     for a, b in pairs:
         perm[a], perm[b] = b, a
     joints, maps = {}, {}  # keyed by id(): a tensor shared by input and label must be flipped only once

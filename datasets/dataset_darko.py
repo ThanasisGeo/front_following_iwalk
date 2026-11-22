@@ -7,7 +7,8 @@
 #
 # Per window (n_hist + n_pred consecutive frames of one trial, stride 1 frame):
 #   * joints -> our 18 (COCO-17 order + root). Root (joint 17) = DARKO pelvis by default (the joint the paper
-#     scores), or the hip midpoint as in Real-IM (dataset_specs.root_joint: pelvis | hip_mid)
+#     scores), or the hip midpoint as in Real-IM (dataset_specs.root_joint: pelvis | hip_mid).
+#     dataset_specs.toes: true appends DARKO's left / right toe as joints 18, 19 (then set n_joints: 20)
 #   * actor frame as for Real-IM: origin = root at "now" (last past frame, also in height), +x = root motion
 #     over the last heading_frames frames (3 = 0.2 s), z up, yaw only. If the root moved less than
 #     dataset_specs.heading_min_move (default 0 = never), +x = the direction the hips face instead
@@ -33,6 +34,7 @@ from utils.gta_utils import traj2map
 # Our joint order (COCO-17) as DARKO joint indices (UPtor/darko/darko.yaml); joint 17 (root) is added below.
 DARKO_TO_COCO = [27, 26, 29, 25, 28, 16, 17, 18, 19, 20, 21, 1, 2, 4, 5, 7, 8]
 DARKO_PELVIS, DARKO_LHIP, DARKO_RHIP = 0, 1, 2
+DARKO_TOES = [10, 11]  # left_toe, right_toe (dataset_specs.toes)
 UNKNOWN = -0.01
 
 
@@ -83,6 +85,9 @@ class DatasetDARKO(Dataset):
             raise FileNotFoundError(f'no DARKO trials (*.npy) in {data_dir}')
         trials = [os.path.splitext(os.path.basename(f))[0] for f in files]
         split = darko_split(trials, ds)
+        toes = ds.get('toes', False)
+        if ds['n_joints'] != (20 if toes else 18):
+            raise ValueError(f"dataset_specs.n_joints must be {20 if toes else 18} with toes: {toes}")
         keep = set(split['train'] + split['val']) if mode == 'trainval' else set(split[mode])
 
         self.pose, self.data = {}, []
@@ -92,7 +97,8 @@ class DatasetDARKO(Dataset):
             a = np.load(f).astype(np.float32)
             j = a[:, 2:].reshape(len(a), 30, 3)
             root = j[:, DARKO_PELVIS] if self.root_joint == 'pelvis' else (j[:, DARKO_LHIP] + j[:, DARKO_RHIP]) / 2
-            self.pose[name] = np.concatenate((j[:, DARKO_TO_COCO], root[:, None]), axis=1)  # (T, 18, 3) world
+            parts = (j[:, DARKO_TO_COCO], root[:, None]) + ((j[:, DARKO_TOES],) if toes else ())
+            self.pose[name] = np.concatenate(parts, axis=1)  # (T, 18 or 20, 3) world
             self.data += [(name, s) for s in range(len(a) - self.n_total + 1)]
         self.idx2scene = {name: name for name in self.pose}  # same attribute name as DatasetGTA
         print(f'DARKO {mode}: {len(self.pose)} trials, {len(self.data)} windows of {self.n_total} frames')
