@@ -4,6 +4,7 @@
 # Every model here predicts only WHERE the person walks during the next n_pred frames. They share one
 # interface, which train_path.py / eval_path.py rely on:
 #   forward(poses_inp) -> {'traj':     (B, n_pred, 2), metres, actor frame,
+#                          'height':   (B, n_pred), root height in the actor frame, only with predict_height,
 #                          'traj_map': (B, n_pred, H, W, 1), only for models with a heat-map output}
 #   save_ckpt(path) / load_ckpt(path, device)
 #   init_from_released(path)   UNet models: warm start from the released PathNet weights
@@ -33,6 +34,9 @@
 #   model_specs.pose_repr (default 'positions'): what the pose encoder reads. 'bone_dirs' = only the direction of
 #                 each bone of a reduced common skeleton (BONES), no bone lengths and no eyes / ears, so datasets
 #                 that place their joints differently can be mixed. Changes only the encoder's input layer.
+#   model_specs.predict_height (default false; cv_residual only): true = the head also outputs a height correction
+#                 per future frame (zero-initialised) on top of "the root stays at its current height", so the
+#                 model predicts the root in 3D ('height') as UPTor does. The path (x, y) is unchanged.
 # =====================================================================================================
 import torch
 from torch import nn
@@ -136,12 +140,15 @@ class PathUNet(nn.Module):
         if self.prior not in ('cv', 'unicycle'):
             raise ValueError(f"unknown model_specs.prior: {self.prior!r} (cv | unicycle)")
         self.n_prior_params = 2 if self.prior == 'unicycle' else 0
+        self.predict_height = ms.get('predict_height', False)
+        # head output: [x, y correction per frame | height correction per frame (predict_height) | prior params]
+        self.n_head_out = self.n_pred * (3 if self.predict_height else 2) + self.n_prior_params
         if self.output == 'cv_residual':
             self.cv_vel_frames = ms.get('cv_vel_frames', 4)
             w = ms.get('cv_head_width', 256)
             head = nn.Sequential(nn.Linear(self.pathnet.fc1.in_features, w), nn.ReLU(),
                                  nn.Dropout(ms.get('mlp_dropout', 0.0)),
-                                 nn.Linear(w, self.n_pred * 2 + self.n_prior_params))
+                                 nn.Linear(w, self.n_head_out))
             nn.init.zeros_(head[-1].weight)
             nn.init.zeros_(head[-1].bias)
             self.pathnet.cv_head = head
@@ -169,7 +176,7 @@ class PathUNet(nn.Module):
                 n_in += container.pose_encoder.out_dim
             w = ms.get('cv_head_width', 256)
             head = nn.Sequential(nn.Linear(n_in, w), nn.ReLU(), nn.Dropout(ms.get('mlp_dropout', 0.0)),
-                                 nn.Linear(w, self.n_pred * 2 + self.n_prior_params))
+                                 nn.Linear(w, self.n_head_out))
             nn.init.zeros_(head[-1].weight)
             nn.init.zeros_(head[-1].bias)
             container.cv_head = head
@@ -228,6 +235,8 @@ class PathUNet(nn.Module):
             else:
                 traj_cv = traj_hist[:, -1:] + vel[:, None, :] * steps[None, :, None]
             out = {'traj': traj_cv + correction.reshape(bs, self.n_pred, 2)}
+            if self.predict_height:  # current root height + learned correction
+                out['height'] = pose[:, -1:, self.root_idx, 2] + head_out[:, self.n_pred * 2:self.n_pred * 3]
             if self.aux_decoder:
                 out['traj_map'] = traj_map_pred
             return out

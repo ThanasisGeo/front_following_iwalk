@@ -128,11 +128,15 @@ def predict(model, loader, root_idx):
     # occ (N, H, W) occupancy map, and keys "<sequence>.<window index>".
     model.eval()
     # gt_z: root height of the true future (the actor frame's origin is the root at "now", so 0 = current height).
-    out = {'pred': [], 'gt': [], 'gt_z': [], 'hist': [], 'occ': [], 'keys': []}
+    # pred_z: predicted root height (models with predict_height), otherwise the current height (0).
+    out = {'pred': [], 'pred_z': [], 'gt': [], 'gt_z': [], 'hist': [], 'occ': [], 'keys': []}
     for poses_inp, poses_label in loader:
-        out['pred'].append(model(poses_inp)['traj'].cpu().numpy())
+        o = model(poses_inp)
+        gt_z = poses_label['pose']['pose'][:, :, root_idx, 2].numpy()
+        out['pred'].append(o['traj'].cpu().numpy())
+        out['pred_z'].append(o['height'].cpu().numpy() if 'height' in o else np.zeros_like(gt_z))
         out['gt'].append(poses_label['pose']['pose'][:, :, root_idx, :2].numpy())
-        out['gt_z'].append(poses_label['pose']['pose'][:, :, root_idx, 2].numpy())
+        out['gt_z'].append(gt_z)
         out['hist'].append(poses_inp['pose']['pose'][:, :, root_idx, :2].numpy())
         out['occ'].append(poses_inp['env']['map'][:, 0, :, :, 0].numpy())
         out['keys'] += list(poses_inp['env']['item_key'])

@@ -81,10 +81,14 @@ def path_loss(out, label, cfg, hist=None):
     else:
         per = lambda a, b: (a - b).pow(2).reshape(len(a), -1).mean(1)
     dist = (lambda a, b: per(a, b).mean()) if w is None else (lambda a, b: (per(a, b) * w).mean())
+    pred_d, gt_d = traj, gt                     # what the distance terms compare: x, y ...
+    if 'height' in out:                         # ... or x, y, z for models that also predict the root height
+        pred_d = torch.cat((traj, out['height'][..., None]), -1)
+        gt_d = label['pose']['pose'][:, :, root_idx, :3].to(dev).float()
     if loss_cfg.get('use_traj', True):
-        terms['traj'] = dist(traj, gt) * loss_cfg.get('weight_traj', 1.0)
+        terms['traj'] = dist(pred_d, gt_d) * loss_cfg.get('weight_traj', 1.0)
     if loss_cfg.get('use_final_pos', True):
-        terms['final_pos'] = dist(traj[:, -1], gt[:, -1]) * loss_cfg.get('weight_final_pos', 1.0)
+        terms['final_pos'] = dist(pred_d[:, -1], gt_d[:, -1]) * loss_cfg.get('weight_final_pos', 1.0)
     if loss_cfg.get('use_obstacle', False):
         occ = label['env']['map'][:, 0, :, :, 0].to(dev).float()
         terms['obstacle'] = obstacle_loss(traj, occ, loss_cfg.get('obstacle_margin', 0.2),

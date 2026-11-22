@@ -98,17 +98,19 @@ def main(args):
             print(f"  {s_name:9s} model: " + ' '.join(f'{v:5.0f}' for v in err_m[mask].mean(0)))
             print(f"  {'':9s} CV:    " + ' '.join(f'{v:5.0f}' for v in err_cv[mask].mean(0)))
 
-    # Paper-style root error (UPTor Tables I / II: ADE_Tr / FDE_Tr on the root joint in 3D). Our models predict x, y
-    # only, so the predicted height is held at the current root height (z = 0 in the actor frame).
+    # Paper-style root error (UPTor Tables I / II: ADE_Tr / FDE_Tr on the root joint in 3D). Models without
+    # predict_height (and CV) hold the predicted height at the current root height (z = 0 in the actor frame).
     paper = {}
     if cfg['dataset'] in UPTOR_SETS:
-        e3 = {name: np.sqrt(((p - res['gt']) ** 2).sum(-1) + res['gt_z'] ** 2) for name, p in (('model', res['pred']), ('cv', cv_pred))}
+        e3 = {name: np.sqrt(((p - res['gt']) ** 2).sum(-1) + (res['gt_z'] - z) ** 2)
+              for name, p, z in (('model', res['pred'], res['pred_z']), ('cv', cv_pred, 0.0))}
         groups = {'all': np.ones(len(res['keys']), bool)}
         if cfg['dataset'] == 'H36M':  # the walking actions vs the mostly static rest
             walk = np.array([k.split('/')[1].split('@')[0].split(' ')[0] in ('Walking', 'WalkDog', 'WalkTogether')
                              for k in res['keys']])
             groups.update({'walking actions': walk, 'other actions': ~walk})
-        print("\npaper-style root error, 3D (predicted height = current height):")
+        height = 'predicted' if cfg['model_specs'].get('predict_height') else 'held at the current height'
+        print(f"\npaper-style root error, 3D (model height {height}):")
         for g, mask in groups.items():
             for name, e in e3.items():
                 paper.setdefault(g, {})[name] = {'ade_3d': float(e[mask].mean()), 'fde_3d': float(e[mask][:, -1].mean()),
