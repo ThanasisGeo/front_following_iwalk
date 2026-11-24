@@ -1,0 +1,21 @@
+{
+ "cfg": "darko_PathPoseUni_heldout",
+ "exp": "abl_bonedirs",
+ "seed": 0,
+ "epochs": 100,
+ "batch_size": 32,
+ "lr": 0.0,
+ "test_seq": null,
+ "set": [
+  "model_specs.pose_repr=bone_dirs"
+ ],
+ "init_released": null,
+ "init": null,
+ "resume": null,
+ "val_frac": 0.2,
+ "val_freq": 1,
+ "select": "val_ade",
+ "save_freq": 0,
+ "num_workers": 1,
+ "max_train_batches": 0
+}

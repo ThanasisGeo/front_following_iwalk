@@ -1,0 +1,23 @@
+{
+ "cfg": "darko_PathPoseUni_heldout",
+ "exp": "cont_reg",
+ "seed": 0,
+ "epochs": 60,
+ "batch_size": 32,
+ "lr": 0.0,
+ "test_seq": null,
+ "set": [
+  "augment.joint_noise=0.02",
+  "weight_decay=0.01",
+  "lr_step_size=40"
+ ],
+ "init_released": null,
+ "init": "results/darko_PathPoseUni_heldout_abl_noise/models/pathnet_best.pt",
+ "resume": null,
+ "val_frac": 0.2,
+ "val_freq": 1,
+ "select": "val_ade",
+ "save_freq": 10,
+ "num_workers": 2,
+ "max_train_batches": 0
+}

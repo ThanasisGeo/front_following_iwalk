@@ -1,0 +1,22 @@
+{
+ "cfg": "cmu_PathPoseCV",
+ "exp": "noise_wd",
+ "seed": 0,
+ "epochs": 50,
+ "batch_size": 32,
+ "lr": 0.0,
+ "test_seq": null,
+ "set": [
+  "augment.joint_noise=0.01",
+  "weight_decay=0.01"
+ ],
+ "init_released": null,
+ "init": null,
+ "resume": null,
+ "val_frac": 0.2,
+ "val_freq": 1,
+ "select": "val_ade",
+ "save_freq": 0,
+ "num_workers": 4,
+ "max_train_batches": 0
+}

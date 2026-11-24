@@ -1,0 +1,36 @@
+CMU train: 289 trials, 122090 windows of 45 frames at 15 Hz
+CMU val: 32 trials, 8237 windows of 45 frames at 15 Hz
+PathUNetPose (pose_input=learned): 0.18 M parameters, device cpu
+augmentation: left/right mirror with probability 0.5
+augmentation: joint noise, std 0.01 m
+epoch 1/30  loss 0.9255  (traj=0.2908 final_pos=0.6347)  72.8s  | val ADE 263 FDE 573 mm, turn(3255) FDE 705, CV FDE 963  [best val_ade @ 1]
+epoch 2/30  loss 0.7655  (traj=0.2373 final_pos=0.5282)  67.4s  | val ADE 240 FDE 540 mm, turn(3255) FDE 667, CV FDE 963  [best val_ade @ 2]
+epoch 3/30  loss 0.7183  (traj=0.2204 final_pos=0.4979)  73.0s  | val ADE 229 FDE 523 mm, turn(3255) FDE 639, CV FDE 963  [best val_ade @ 3]
+epoch 4/30  loss 0.6922  (traj=0.2114 final_pos=0.4809)  64.9s  | val ADE 221 FDE 507 mm, turn(3255) FDE 623, CV FDE 963  [best val_ade @ 4]
+epoch 5/30  loss 0.6722  (traj=0.2046 final_pos=0.4676)  66.1s  | val ADE 219 FDE 502 mm, turn(3255) FDE 626, CV FDE 963  [best val_ade @ 5]
+epoch 6/30  loss 0.6568  (traj=0.1996 final_pos=0.4572)  68.8s  | val ADE 220 FDE 506 mm, turn(3255) FDE 638, CV FDE 963  [best val_ade @ 5]
+epoch 7/30  loss 0.6440  (traj=0.1955 final_pos=0.4485)  68.4s  | val ADE 212 FDE 489 mm, turn(3255) FDE 619, CV FDE 963  [best val_ade @ 7]
+epoch 8/30  loss 0.6323  (traj=0.1919 final_pos=0.4404)  71.2s  | val ADE 212 FDE 490 mm, turn(3255) FDE 607, CV FDE 963  [best val_ade @ 8]
+epoch 9/30  loss 0.6229  (traj=0.1889 final_pos=0.434)  64.3s  | val ADE 207 FDE 477 mm, turn(3255) FDE 599, CV FDE 963  [best val_ade @ 9]
+epoch 10/30  loss 0.6133  (traj=0.186 final_pos=0.4273)  68.6s  | val ADE 209 FDE 484 mm, turn(3255) FDE 596, CV FDE 963  [best val_ade @ 9]
+epoch 11/30  loss 0.6048  (traj=0.1835 final_pos=0.4214)  61.7s  | val ADE 204 FDE 472 mm, turn(3255) FDE 583, CV FDE 963  [best val_ade @ 11]
+epoch 12/30  loss 0.5975  (traj=0.1812 final_pos=0.4163)  63.2s  | val ADE 203 FDE 470 mm, turn(3255) FDE 587, CV FDE 963  [best val_ade @ 12]
+epoch 13/30  loss 0.5915  (traj=0.1794 final_pos=0.4121)  76.3s  | val ADE 205 FDE 473 mm, turn(3255) FDE 594, CV FDE 963  [best val_ade @ 12]
+epoch 14/30  loss 0.5849  (traj=0.1775 final_pos=0.4073)  64.2s  | val ADE 201 FDE 464 mm, turn(3255) FDE 580, CV FDE 963  [best val_ade @ 14]
+epoch 15/30  loss 0.5801  (traj=0.1762 final_pos=0.4039)  65.1s  | val ADE 203 FDE 468 mm, turn(3255) FDE 590, CV FDE 963  [best val_ade @ 14]
+epoch 16/30  loss 0.5739  (traj=0.1743 final_pos=0.3995)  68.1s  | val ADE 203 FDE 467 mm, turn(3255) FDE 581, CV FDE 963  [best val_ade @ 14]
+epoch 17/30  loss 0.5688  (traj=0.1729 final_pos=0.3959)  72.9s  | val ADE 200 FDE 461 mm, turn(3255) FDE 571, CV FDE 963  [best val_ade @ 17]
+epoch 18/30  loss 0.5630  (traj=0.1712 final_pos=0.3918)  72.1s  | val ADE 199 FDE 460 mm, turn(3255) FDE 580, CV FDE 963  [best val_ade @ 18]
+epoch 19/30  loss 0.5588  (traj=0.1701 final_pos=0.3888)  67.0s  | val ADE 200 FDE 463 mm, turn(3255) FDE 573, CV FDE 963  [best val_ade @ 18]
+epoch 20/30  loss 0.5535  (traj=0.1686 final_pos=0.3849)  68.6s  | val ADE 202 FDE 467 mm, turn(3255) FDE 582, CV FDE 963  [best val_ade @ 18]
+epoch 21/30  loss 0.5376  (traj=0.1637 final_pos=0.3739)  71.5s  | val ADE 195 FDE 452 mm, turn(3255) FDE 560, CV FDE 963  [best val_ade @ 21]
+epoch 22/30  loss 0.5345  (traj=0.1628 final_pos=0.3717)  71.7s  | val ADE 195 FDE 450 mm, turn(3255) FDE 553, CV FDE 963  [best val_ade @ 22]
+epoch 23/30  loss 0.5338  (traj=0.1627 final_pos=0.3711)  69.2s  | val ADE 195 FDE 451 mm, turn(3255) FDE 556, CV FDE 963  [best val_ade @ 22]
+epoch 24/30  loss 0.5329  (traj=0.1624 final_pos=0.3704)  65.1s  | val ADE 196 FDE 453 mm, turn(3255) FDE 555, CV FDE 963  [best val_ade @ 22]
+epoch 25/30  loss 0.5327  (traj=0.1624 final_pos=0.3703)  74.9s  | val ADE 195 FDE 452 mm, turn(3255) FDE 557, CV FDE 963  [best val_ade @ 22]
+epoch 26/30  loss 0.5320  (traj=0.1621 final_pos=0.3698)  71.9s  | val ADE 195 FDE 451 mm, turn(3255) FDE 556, CV FDE 963  [best val_ade @ 22]
+epoch 27/30  loss 0.5307  (traj=0.1618 final_pos=0.3689)  67.6s  | val ADE 196 FDE 452 mm, turn(3255) FDE 556, CV FDE 963  [best val_ade @ 22]
+epoch 28/30  loss 0.5308  (traj=0.1619 final_pos=0.3688)  70.7s  | val ADE 194 FDE 450 mm, turn(3255) FDE 554, CV FDE 963  [best val_ade @ 28]
+epoch 29/30  loss 0.5296  (traj=0.1616 final_pos=0.368)  62.2s  | val ADE 195 FDE 451 mm, turn(3255) FDE 555, CV FDE 963  [best val_ade @ 28]
+epoch 30/30  loss 0.5290  (traj=0.1613 final_pos=0.3676)  69.9s  | val ADE 195 FDE 452 mm, turn(3255) FDE 553, CV FDE 963  [best val_ade @ 28]
+done: epoch 30, best val_ade = 0.1944 at epoch 28

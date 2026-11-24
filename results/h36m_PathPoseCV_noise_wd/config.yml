@@ -1,0 +1,64 @@
+dataset: H36M
+model_name: PathUNetPose
+model_specs:
+  n_feats_unet: 16
+  n_feats_unet_mlp: 1024
+  mlp_width: 512
+  mlp_dropout: 0.2
+  output: cv_residual
+  aux_decoder: false
+  map_input: none
+  cv_vel_frames: 1
+  cv_head_width: 256
+  pose_input: learned
+  n_feats_pose_path: 128
+dataset_specs:
+  data_file: ../data/H36M/
+  hz: 10
+  n_hist: 5
+  n_pred: 20
+  n_joints: 18
+  root_idx: 17
+  left_hip_idx: 11
+  right_hip_idx: 12
+  heading_frames: 2
+  heading_min_move: 0.05
+  max_dist_from_human: 4
+  map_extent: 2.5
+  map_size: 40
+  use_map: true
+  use_traj_map: false
+  split_seed: 0
+  val_frac: 0.1
+  test_offsets: first
+  test_stride: 25
+loss:
+  distance: euclidean
+  use_traj: true
+  use_final_pos: true
+  use_traj_map: false
+  use_collision: false
+  use_obstacle: false
+  weight_traj: 1
+  weight_final_pos: 1
+turns:
+  dt: 0.1
+  vel_frames: 1
+  turn_lat: 0.5
+  turn_heading: 30.0
+  straight_lat_max: 0.33
+  hist_curv_new: 15.0
+  onset_lat: 0.17
+  lat_bins:
+  - 0.0
+  - 0.17
+  - 0.5
+  - 1.0
+lr: 0.0001
+lr_step_size: 12
+lr_gamma: 0.1
+weight_decay: 0.01
+augment:
+  mirror: 0.5
+  joint_noise: 0.01
+save_freq: 25

@@ -1,0 +1,33 @@
+model config: results/darko_PathPoseUni_heldout_pt_ft/config.yml
+checkpoint: results/darko_PathPoseUni_heldout_pt_ft/models/pathnet_100.pt
+DARKO test: 59 trials, 1052 windows of 45 frames
+
+PathUNetPose (pathnet_100.pt) on darko_heldout_short: 1052 windows
+subset              n | PathUN:    ADE    FDE    @1s    @2s    lat  head°  miss%  coll% | CV:    ADE    FDE
+-----------------------------------------------------------------------------------------------------------
+all              1052 |            130    275    116    275    201    6.1    0.3    0.0 |        147    308
+straight          779 |            114    230    103    230    159    4.8    0.0    0.0 |        111    217
+turn              112 |            222    525    193    525    417   12.9    2.7    0.0 |        321    744
+turn_heading       16 |            310    682    268    682    410   13.8   12.5    0.0 |        482   1024
+turn_new          109 |            222    524    194    524    420   12.9    2.8    0.0 |        320    742
+turn_ongoing        3 |            245    583    167    583    306   11.7    0.0    0.0 |        348    794
+lat_0.00-0.17     474 |            108    208    100    208    136    4.1    0.0    0.0 |         95    164
+lat_0.17-0.50     466 |            131    284    113    284    216    6.4    0.0    0.0 |        159    349
+lat_0.50-1.00     108 |            216    515    187    515    424   13.0    1.9    0.0 |        313    731
+lat_1.00+           4 |            385    801    367    801    239    9.4   25.0    0.0 |        531   1091
+(distances in mm; lat = sideways part of the endpoint error; CV = constant velocity B0)
+ground truth itself in occupied cells: 0.0% of points (reference for coll%)
+
+error per future frame (mm), frames at 0.07, 0.13, 0.20, 0.27, 0.33, 0.40, 0.47, 0.53, 0.60, 0.67, 0.73, 0.80, 0.87, 0.93, 1.00, 1.07, 1.13, 1.20, 1.27, 1.33, 1.40, 1.47, 1.53, 1.60, 1.67, 1.73, 1.80, 1.87, 1.93, 2.00 s
+  all       model:    19    33    41    46    53    59    64    68    72    77    83    90    98   107   116   125   134   142   151   159   168   178   188   198   210   221   231   244   258   275
+            CV:       21    38    50    58    65    70    75    79    85    92   100   109   118   127   135   143   150   157   165   173   183   194   206   218   232   246   259   273   289   308
+  straight  model:    19    32    39    45    52    58    62    65    69    71    75    80    87    95   103   111   118   125   131   138   145   153   161   169   179   189   197   206   217   230
+            CV:       20    36    47    53    59    63    65    67    70    74    80    86    93    99   105   110   114   118   122   127   132   140   148   157   167   177   186   194   204   217
+  turn      model:    20    36    44    53    63    73    84    93   101   114   130   145   160   176   193   212   230   250   268   285   302   320   338   354   371   391   412   443   483   525
+            CV:       25    48    65    79    94   109   126   141   156   175   196   218   239   261   282   302   323   347   374   401   429   456   483   509   538   570   602   643   692   744
+
+paper-style root error, 3D (predicted height = current height):
+  all              model  ADE_Tr 0.137 m   FDE_Tr 0.286 m   (1052 windows)
+  all              cv     ADE_Tr 0.154 m   FDE_Tr 0.318 m   (1052 windows)
+  (UPTor paper, Table II: UPTor 0.13 / 0.26 m, STPOTR 0.17 / 0.34 m; different test trials)
+saved results/darko_PathPoseUni_heldout_pt_ft/eval/pathnet_last_darko_heldout_short/metrics.json and per_window.csv

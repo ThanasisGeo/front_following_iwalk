@@ -1,0 +1,37 @@
+model config: results/h36m_PathPoseCV_noise_wd/config.yml
+checkpoint: results/h36m_PathPoseCV_noise_wd/models/pathnet_best.pt
+H36M test: 59 trials, 1057 windows of 25 frames at 10 Hz
+
+PathUNetPose (pathnet_best.pt) on h36m_S9+S11: 1057 windows
+subset              n | PathUN:    ADE    FDE    @1s    @2s    lat  head°  miss%  coll% | CV:    ADE    FDE
+-----------------------------------------------------------------------------------------------------------
+all              1057 |            122    262    107    262    111   60.5    2.9    0.0 |        209    468
+straight          797 |             88    175     82    175     66   68.9    1.3    0.0 |        135    283
+turn              195 |            228    545    179    545    281   29.3    8.7    0.0 |        481   1163
+turn_heading      743 |            118    254    103    254    106   66.5    3.2    0.0 |        217    495
+turn_new           89 |            190    485    138    485    342   21.8    7.9    0.0 |        474   1166
+turn_ongoing      106 |            260    595    213    595    230   35.7    9.4    0.0 |        488   1160
+lat_0.00-0.17     693 |             74    142     71    142     57   71.8    0.9    0.0 |        119    246
+lat_0.17-0.50     169 |            196    424    174    424    137   49.8    4.7    0.0 |        263    575
+lat_0.50-1.00     129 |            224    530    177    530    227   32.6    6.2    0.0 |        395    940
+lat_1.00+          66 |            235    574    183    574    386   22.9   13.6    0.0 |        649   1598
+(distances in mm; lat = sideways part of the endpoint error; CV = constant velocity B0)
+ground truth itself in occupied cells: 0.0% of points (reference for coll%)
+
+error per future frame (mm), frames at 0.10, 0.20, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00, 1.10, 1.20, 1.30, 1.40, 1.50, 1.60, 1.70, 1.80, 1.90, 2.00 s
+  all       model:     8    15    24    34    45    56    68    81    94   107   122   137   152   167   182   198   213   229   245   262
+            CV:        7    19    34    51    68    88   109   131   155   181   207   233   261   289   317   346   375   404   435   468
+  straight  model:     7    14    22    29    37    45    54    63    73    82    92   101   110   119   128   137   146   155   165   175
+            CV:        6    15    26    38    51    65    79    93   108   124   139   154   170   185   200   216   232   248   265   283
+  turn      model:     9    19    31    46    64    84   105   128   152   179   210   244   279   315   351   389   428   468   507   545
+            CV:       12    34    61    92   127   167   213   266   324   387   454   524   596   671   747   825   905   988  1074  1163
+
+paper-style root error, 3D (predicted height = current height):
+  all              model  ADE_Tr 0.128 m   FDE_Tr 0.272 m   (1057 windows)
+  all              cv     ADE_Tr 0.214 m   FDE_Tr 0.477 m   (1057 windows)
+  walking actions  model  ADE_Tr 0.224 m   FDE_Tr 0.536 m   (161 windows)
+  walking actions  cv     ADE_Tr 0.471 m   FDE_Tr 1.164 m   (161 windows)
+  other actions    model  ADE_Tr 0.111 m   FDE_Tr 0.225 m   (896 windows)
+  other actions    cv     ADE_Tr 0.168 m   FDE_Tr 0.353 m   (896 windows)
+  (UPTor paper, Table I: UPTor 0.12 / 0.25 m, STPOTR 0.13 / 0.27 m, DMMGAN 0.12 / 0.23 m and DLow 0.19 / 0.45 m are best-of-many samples; same test subjects S9, S11)
+saved results/h36m_PathPoseCV_noise_wd/eval/pathnet_best_h36m_S9+S11/metrics.json and per_window.csv
